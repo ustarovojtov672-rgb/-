@@ -1,5 +1,6 @@
 {
   "runtime": "pi-coding-agent",
+  "appRuntimeEnv": "NUTRITION_AGENT_RUNTIME=pi",
   "provider": "openai-codex",
   "model": "openai-codex/gpt-5.5",
   "mode": "print",

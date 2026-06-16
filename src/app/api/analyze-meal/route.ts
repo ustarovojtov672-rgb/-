@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import { analyzeMealWithNutritionAgent } from "@/lib/nutrition-agent/agent";
+import { analyzeMealWithPiNutritionAgent } from "@/lib/nutrition-agent/pi-agent";
+import type {
+  NutritionAgentInput,
+  NutritionAgentRuntime,
+} from "@/lib/nutrition-agent/types";
 
 export const runtime = "nodejs";
 
@@ -46,13 +51,18 @@ const PreviousMealSchema = z.object({
 const PreviousMealsSchema = z.array(PreviousMealSchema).max(20);
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  let agentRuntime: NutritionAgentRuntime;
 
-  if (!apiKey) {
+  try {
+    agentRuntime = configuredNutritionAgentRuntime();
+  } catch (error) {
     return Response.json(
       {
-        code: "OPENAI_API_KEY_MISSING",
-        error: "OPENAI_API_KEY не задан на сервере.",
+        code: "NUTRITION_AGENT_RUNTIME_INVALID",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Некорректный runtime агента питания.",
       },
       { status: 500 },
     );
@@ -128,8 +138,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const meal = await analyzeMealWithNutritionAgent({
-      apiKey,
+    const meal = await analyzeMeal({
+      runtime: agentRuntime,
       description,
       photoFile,
       profile,
@@ -151,6 +161,38 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+}
+
+async function analyzeMeal({
+  runtime,
+  ...input
+}: NutritionAgentInput & { runtime: NutritionAgentRuntime }) {
+  if (runtime === "pi") {
+    return analyzeMealWithPiNutritionAgent(input);
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY не задан на сервере.");
+  }
+
+  return analyzeMealWithNutritionAgent({
+    ...input,
+    apiKey,
+  });
+}
+
+function configuredNutritionAgentRuntime(): NutritionAgentRuntime {
+  const runtime = process.env.NUTRITION_AGENT_RUNTIME ?? "pi";
+
+  if (runtime === "pi" || runtime === "openai") {
+    return runtime;
+  }
+
+  throw new Error(
+    `NUTRITION_AGENT_RUNTIME должен быть pi или openai, сейчас: ${runtime}.`,
+  );
 }
 
 function stringField(formData: FormData, name: string) {

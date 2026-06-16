@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  type FormEvent,
+} from "react";
 import {
   Apple,
   ArrowRight,
@@ -778,6 +784,8 @@ export function NutritionDiary() {
   const [photoInputKey, setPhotoInputKey] = useState(0);
   const [reviewDraft, setReviewDraft] = useState<MealDraft | null>(null);
   const [isMealBusy, setIsMealBusy] = useState(false);
+  const [isPhotoDragActive, setIsPhotoDragActive] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
   const [status, setStatus] = useState("Дневник сохранен локально через Jazz.");
 
   if (!account.$isLoaded) {
@@ -820,23 +828,57 @@ export function NutritionDiary() {
     goalId: goal.id,
   });
 
-  function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  function setMealPhoto(file: File) {
     if (photoPreview) {
       URL.revokeObjectURL(photoPreview);
     }
 
     if (!file.type.startsWith("image/")) {
-      throw new Error(`Unsupported meal photo type: ${file.type}`);
+      setAnalysisError("Нужен файл изображения.");
+      setStatus("Фото не добавлено: файл не похож на изображение.");
+      return;
     }
 
     setPhotoName(file.name);
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setReviewDraft(null);
-    setStatus("Фото добавлено к черновику, анализ нужно запустить заново.");
+    setAnalysisError("");
+    setStatus("Фото добавлено. Нажми «Добавить», чтобы запустить анализ.");
+  }
+
+  function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setMealPhoto(file);
+  }
+
+  function handlePhotoDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsPhotoDragActive(false);
+
+    const file = Array.from(event.dataTransfer.files).find((item) =>
+      item.type.startsWith("image/"),
+    );
+
+    if (!file) {
+      setAnalysisError("Перетащи сюда файл изображения.");
+      setStatus("Фото не добавлено.");
+      return;
+    }
+
+    setMealPhoto(file);
+  }
+
+  function handleMealTextPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const file = Array.from(event.clipboardData.files).find((item) =>
+      item.type.startsWith("image/"),
+    );
+
+    if (file) {
+      setMealPhoto(file);
+    }
   }
 
   function updateReviewDraft(patch: Partial<MealDraft>) {
@@ -902,14 +944,19 @@ export function NutritionDiary() {
 
   function clearMealComposer() {
     setMealText("");
-    setPhotoFile(null);
-    setPhotoName("");
-    setPhotoInputKey((key) => key + 1);
+    clearPhotoDraft();
+  }
 
+  function clearPhotoDraft() {
     if (photoPreview) {
       URL.revokeObjectURL(photoPreview);
-      setPhotoPreview(null);
     }
+
+    setPhotoFile(null);
+    setPhotoName("");
+    setPhotoPreview(null);
+    setPhotoInputKey((key) => key + 1);
+    setIsPhotoDragActive(false);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -924,6 +971,7 @@ export function NutritionDiary() {
     }
 
     setIsMealBusy(true);
+    setAnalysisError("");
     setStatus("Анализируем еду через AI.");
 
     try {
@@ -944,11 +992,11 @@ export function NutritionDiary() {
       setReviewDraft(mealDraft);
       setStatus("Проверь AI-расчет перед сохранением.");
     } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? `AI-анализ не прошел: ${error.message}`
-          : "AI-анализ не прошел.",
-      );
+      const message =
+        error instanceof Error ? error.message : "AI-анализ не прошел.";
+
+      setAnalysisError(message);
+      setStatus("AI-анализ не прошел.");
     } finally {
       setIsMealBusy(false);
     }
@@ -1298,29 +1346,95 @@ export function NutritionDiary() {
                 id="meal-text"
                 value={mealText}
                 onChange={(event) => setMealText(event.target.value)}
+                onPaste={handleMealTextPaste}
                 placeholder="Например: курица, рис, салат, латте"
                 className="min-h-28 resize-none border-[#cfd9d3] bg-[#fbfcfb] text-base"
               />
 
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <Input
-                    key={photoInputKey}
-                    id="meal-photo"
-                    name="meal-photo"
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={handlePhotoChange}
-                  />
+              <div
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setIsPhotoDragActive(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsPhotoDragActive(true);
+                }}
+                onDragLeave={() => setIsPhotoDragActive(false)}
+                onDrop={handlePhotoDrop}
+                className={cn(
+                  "rounded-lg border border-dashed border-[#cfd9d3] bg-[#fbfcfb] p-3 transition-colors",
+                  isPhotoDragActive && "border-[#225b43] bg-[#e7f1eb]",
+                )}
+              >
+                <Input
+                  key={photoInputKey}
+                  id="meal-photo"
+                  name="meal-photo"
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handlePhotoChange}
+                />
+                {photoPreview ? (
+                  <div className="grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)]">
+                    <div
+                      aria-label="Фото для анализа"
+                      className="h-28 w-full rounded-lg bg-cover bg-center sm:w-[140px]"
+                      style={{ backgroundImage: `url(${photoPreview})` }}
+                    />
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-medium text-[#26302c]">
+                        {photoName}
+                      </p>
+                      <p className="mt-1 text-sm leading-5 text-[#617069]">
+                        Фото готово к анализу. Можно добавить текст для точной порции.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Label
+                          htmlFor="meal-photo"
+                          className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#cfd9d3] bg-white px-3 text-sm font-medium transition-colors hover:bg-[#f3f7f4]"
+                        >
+                          <ImagePlus className="size-4" aria-hidden="true" />
+                          Заменить фото
+                        </Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 px-3"
+                          onClick={clearPhotoDraft}
+                        >
+                          Убрать фото
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                   <Label
                     htmlFor="meal-photo"
-                    className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#cfd9d3] bg-white px-3 text-sm font-medium transition-colors hover:bg-[#f3f7f4]"
+                    className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg text-center"
                   >
-                    <ImagePlus className="size-4" aria-hidden="true" />
-                    Добавить фото
+                    <ImagePlus
+                      className="size-6 text-[#225b43]"
+                      aria-hidden="true"
+                    />
+                    <span className="mt-2 text-sm font-medium text-[#26302c]">
+                      Добавить фото еды
+                    </span>
+                    <span className="mt-1 text-sm leading-5 text-[#617069]">
+                      Нажми сюда, перетащи изображение или вставь его в поле текста.
+                    </span>
                   </Label>
+                )}
+              </div>
+
+              {analysisError ? (
+                <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
+                  {analysisError}
                 </div>
+              ) : null}
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                 <Button
                   type="submit"
                   className="h-10 gap-2 px-4"
