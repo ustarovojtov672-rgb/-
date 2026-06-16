@@ -1,6 +1,6 @@
-import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
+
+import { analyzeMealWithNutritionAgent } from "@/lib/nutrition-agent/agent";
 
 export const runtime = "nodejs";
 
@@ -29,9 +29,10 @@ const TargetsSchema = z.object({
   potassium: z.number(),
 });
 
-const MealAnalysisSchema = z.object({
+const PreviousMealSchema = z.object({
   title: z.string(),
   detail: z.string(),
+  eatenAtIso: z.string(),
   caloriesKcal: z.number(),
   proteinGrams: z.number(),
   fatGrams: z.number(),
@@ -39,10 +40,10 @@ const MealAnalysisSchema = z.object({
   fiberGrams: z.number(),
   ironMilligrams: z.number(),
   potassiumMilligrams: z.number(),
-  confidencePercent: z.number().min(0).max(100),
-  recommendation: z.string(),
-  identifiedFoods: z.array(z.string()).max(8),
+  recommendation: z.string().optional(),
 });
+
+const PreviousMealsSchema = z.array(PreviousMealSchema).max(20);
 
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -62,12 +63,19 @@ export async function POST(request: Request) {
   let profile: z.infer<typeof NutritionProfileSchema>;
   let goal: z.infer<typeof GoalSchema>;
   let targets: z.infer<typeof TargetsSchema>;
+  let previousMeals: z.infer<typeof PreviousMealsSchema>;
 
   try {
     description = stringField(formData, "description").trim();
     profile = parseJsonField(formData, "profile", NutritionProfileSchema);
     goal = parseJsonField(formData, "goal", GoalSchema);
     targets = parseJsonField(formData, "targets", TargetsSchema);
+    previousMeals = parseOptionalJsonField(
+      formData,
+      "previousMeals",
+      PreviousMealsSchema,
+      [],
+    );
   } catch (error) {
     return Response.json(
       {
@@ -82,15 +90,7 @@ export async function POST(request: Request) {
   }
 
   const photo = formData.get("photo");
-  const content: Array<
-    | { type: "input_text"; text: string }
-    | { type: "input_image"; image_url: string; detail: "low" }
-  > = [
-    {
-      type: "input_text",
-      text: buildPrompt({ description, profile, goal, targets }),
-    },
-  ];
+  let photoFile: File | null = null;
 
   if (photo !== null) {
     if (!(photo instanceof File)) {
@@ -117,12 +117,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const bytes = Buffer.from(await photo.arrayBuffer());
-    content.push({
-      type: "input_image",
-      image_url: `data:${photo.type};base64,${bytes.toString("base64")}`,
-      detail: "low",
-    });
+    photoFile = photo;
   }
 
   if (!description && photo === null) {
@@ -132,36 +127,30 @@ export async function POST(request: Request) {
     );
   }
 
-  const client = new OpenAI({ apiKey });
-  const response = await client.responses.parse({
-    model: process.env.OPENAI_MEAL_MODEL ?? "gpt-5.5",
-    input: [
-      {
-        role: "system",
-        content:
-          "Ты нутрициологический анализатор для дневника питания. Оценивай еду по тексту и фото, возвращай только структурированный результат на русском. Числа должны быть реалистичной оценкой порции, а не медицинским назначением.",
-      },
-      {
-        role: "user",
-        content,
-      },
-    ],
-    reasoning: {
-      effort: "low",
-    },
-    text: {
-      format: zodTextFormat(MealAnalysisSchema, "meal_analysis"),
-    },
-  });
+  try {
+    const meal = await analyzeMealWithNutritionAgent({
+      apiKey,
+      description,
+      photoFile,
+      profile,
+      goal,
+      targets,
+      previousMeals,
+    });
 
-  if (!response.output_parsed) {
+    return Response.json({ meal });
+  } catch (error) {
     return Response.json(
-      { code: "MEAL_ANALYSIS_EMPTY", error: "AI не вернул расчет еды." },
+      {
+        code: "NUTRITION_AGENT_FAILED",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Агент питания не смог рассчитать еду.",
+      },
       { status: 502 },
     );
   }
-
-  return Response.json({ meal: response.output_parsed });
 }
 
 function stringField(formData: FormData, name: string) {
@@ -183,22 +172,21 @@ function parseJsonField<T extends z.ZodType>(
   return schema.parse(JSON.parse(raw));
 }
 
-function buildPrompt({
-  description,
-  profile,
-  goal,
-  targets,
-}: {
-  description: string;
-  profile: z.infer<typeof NutritionProfileSchema>;
-  goal: z.infer<typeof GoalSchema>;
-  targets: z.infer<typeof TargetsSchema>;
-}) {
-  return [
-    `Описание пользователя: ${description || "текста нет, используй фото"}.`,
-    `Цель: ${goal.label} (${goal.id}).`,
-    `Профиль: ${profile.biologicalSex}, ${profile.ageYears} лет, ${profile.heightCentimeters} см, ${profile.weightKilograms} кг, активность ${profile.activityLevel}.`,
-    `Дневные ориентиры: ${targets.calories} ккал, белок ${targets.protein} г, жиры ${targets.fat} г, углеводы ${targets.carbs} г, клетчатка ${targets.fiber} г, железо ${targets.iron} мг, калий ${targets.potassium} мг.`,
-    "Верни оценку только для текущего приема пищи. Если порция не ясна, оцени обычную порцию и снизь confidencePercent.",
-  ].join("\n");
+function parseOptionalJsonField<T extends z.ZodType>(
+  formData: FormData,
+  name: string,
+  schema: T,
+  defaultValue: z.infer<T>,
+): z.infer<T> {
+  const raw = formData.get(name);
+
+  if (raw === null) {
+    return defaultValue;
+  }
+
+  if (typeof raw !== "string") {
+    throw new Error(`Form field ${name} must be a string.`);
+  }
+
+  return schema.parse(JSON.parse(raw));
 }

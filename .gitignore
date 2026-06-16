@@ -27,6 +27,8 @@
 .pi/npm/
 Аi агент для поиска/.pi-agent/
 Аi агент для поиска/sessions/
+Аi агент питания/.pi-agent/
+Аi агент питания/sessions/
 
 # debug
 npm-debug.log*

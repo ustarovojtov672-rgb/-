@@ -1,0 +1,29 @@
+{
+  "runtime": "pi-coding-agent",
+  "provider": "openai-codex",
+  "model": "openai-codex/gpt-5.5",
+  "mode": "print",
+  "requiredSkills": [
+    "skills/nutrition-agent/SKILL.md",
+    "../Аi агент для поиска/skills/codex-search/SKILL.md"
+  ],
+  "memoryInputs": [
+    "Jazz MealEntry history",
+    "previousMeals payload from /api/analyze-meal"
+  ],
+  "tools": [
+    "vision",
+    "ocr",
+    "barcode",
+    "memory",
+    "local_food_database",
+    "codex_search",
+    "structured_output"
+  ],
+  "auth": {
+    "type": "pi-openai-codex-oauth",
+    "loginCommandInsidePi": "/login openai-codex",
+    "localAuthDirectory": ".pi-agent"
+  },
+  "sessionsDirectory": "sessions"
+}

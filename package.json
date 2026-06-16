@@ -12,6 +12,8 @@
     "pi:install-codex-search": "pi install npm:pi-codex-search -l --approve",
     "agent:login": "powershell -NoProfile -ExecutionPolicy Bypass -File \"./Аi агент для поиска/login-openai-codex.ps1\"",
     "agent:search": "powershell -NoProfile -ExecutionPolicy Bypass -File \"./Аi агент для поиска/run-search-agent.ps1\"",
+    "nutrition-agent:login": "powershell -NoProfile -ExecutionPolicy Bypass -File \"./Аi агент питания/login-openai-codex.ps1\"",
+    "nutrition-agent:run": "powershell -NoProfile -ExecutionPolicy Bypass -File \"./Аi агент питания/run-nutrition-agent.ps1\"",
     "build": "next build",
     "start": "next start",
     "start:mobile": "serve out",

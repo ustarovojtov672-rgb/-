@@ -9,16 +9,20 @@
 - Capacitor с `webDir: "out"`
 - Локальный Jazz `jazz-tools` для local-first данных
 - Pi Coding Agent и `pi-codex-search` для поиска через Codex auth
+- Nutrition agent для анализа еды через память, фото, OCR, локальную базу и web search
 - `just-bash` как bash runtime для агентских сценариев
 
 ## Запуск
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
 Откройте `http://localhost:3000`.
+
+Для реального AI-анализа заполните `OPENAI_API_KEY` в `.env.local` или системном окружении и перезапустите `npm run dev`.
 
 ## Проверка и сборка
 
@@ -28,7 +32,7 @@ npm run build
 npm run start
 ```
 
-`npm run build` собирает статический экспорт в `out`, а `npm run start` раздает эту папку через `serve`.
+`npm run build` проверяет web/server-сборку Next.js. `npm run build:mobile` собирает статический экспорт в `out` для Capacitor.
 
 ## Capacitor
 
@@ -68,5 +72,16 @@ pi install npm:pi-codex-search -l --approve
 npm run agent:login
 npm run agent:search -- "что изменилось в Next.js static export"
 ```
+
+## Pi nutrition agent
+
+Локальный агент питания лежит в `Аi агент питания/`.
+
+```bash
+npm run nutrition-agent:login
+npm run nutrition-agent:run -- "На фото упаковка творога, нужно посчитать 200 г"
+```
+
+Серверный слой приложения уже выделен в `src/lib/nutrition-agent/`: туда приходит текст, фото, профиль, цель, дневные ориентиры и последние приемы пищи. Агент использует похожие прошлые записи, локальную базу продуктов и OpenAI web search, а UI показывает черновик расчета с объяснением перед сохранением.
 
 Форма авторизации отправляет данные на `/auth/start`. Этот endpoint должен быть реализован вместе с выбранным auth-потоком Jazz перед production-сборкой.

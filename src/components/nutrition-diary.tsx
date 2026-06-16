@@ -77,6 +77,10 @@ type MealDraft = {
   potassiumMilligrams: number;
   confidencePercent?: number;
   recommendation?: string;
+  portionAssumption?: string;
+  agentSummary?: string;
+  evidenceSummary?: string;
+  sourceUrls?: string;
 };
 
 type ReviewNumberField =
@@ -496,6 +500,12 @@ function mealDraftFromAnalysis({
       normalizePositive(analysis.confidencePercent, "confidencePercent"),
     ),
     recommendation: analysis.recommendation,
+    portionAssumption: analysis.portionAssumption,
+    agentSummary: analysis.agentSummary,
+    evidenceSummary: analysis.evidence
+      .map((item) => `${item.label}: ${item.detail}`)
+      .join("\n"),
+    sourceUrls: analysis.sourceUrls.join("\n"),
   };
 
   if (photoName) {
@@ -510,17 +520,37 @@ async function analyzeMeal({
   photoFile,
   profile,
   goal,
+  previousMeals,
 }: {
   text: string;
   photoFile: File | null;
   profile: NutritionProfileData;
   goal: GoalWithTargets;
+  previousMeals: MealDraft[];
 }) {
   const formData = new FormData();
   formData.set("description", text);
   formData.set("profile", JSON.stringify(profile));
   formData.set("goal", JSON.stringify({ id: goal.id, label: goal.label }));
   formData.set("targets", JSON.stringify(goal.targets));
+  formData.set(
+    "previousMeals",
+    JSON.stringify(
+      previousMeals.slice(0, 12).map((meal) => ({
+        title: meal.title,
+        detail: meal.detail,
+        eatenAtIso: meal.eatenAtIso,
+        caloriesKcal: meal.caloriesKcal,
+        proteinGrams: meal.proteinGrams,
+        fatGrams: meal.fatGrams,
+        carbsGrams: meal.carbsGrams,
+        fiberGrams: meal.fiberGrams,
+        ironMilligrams: meal.ironMilligrams,
+        potassiumMilligrams: meal.potassiumMilligrams,
+        recommendation: meal.recommendation,
+      })),
+    ),
+  );
 
   if (photoFile) {
     formData.set("photo", photoFile);
@@ -825,6 +855,7 @@ export function NutritionDiary() {
         photoFile,
         profile: nutritionProfile,
         goal,
+        previousMeals: meals,
       });
 
       const mealDraft = mealDraftFromAnalysis({
@@ -841,7 +872,6 @@ export function NutritionDiary() {
           ? `AI-анализ не прошел: ${error.message}`
           : "AI-анализ не прошел.",
       );
-      throw error;
     } finally {
       setIsMealBusy(false);
     }
@@ -1273,6 +1303,30 @@ export function NutritionDiary() {
                       className="min-h-20 resize-none border-[#cfd9d3] bg-[#fbfcfb]"
                     />
                   </div>
+                  {reviewDraft.agentSummary || reviewDraft.portionAssumption ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {reviewDraft.agentSummary ? (
+                        <div className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                          <p className="text-sm font-medium text-[#26302c]">
+                            Как решил агент
+                          </p>
+                          <p className="mt-1 text-sm leading-5 text-[#617069]">
+                            {reviewDraft.agentSummary}
+                          </p>
+                        </div>
+                      ) : null}
+                      {reviewDraft.portionAssumption ? (
+                        <div className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                          <p className="text-sm font-medium text-[#26302c]">
+                            Порция
+                          </p>
+                          <p className="mt-1 text-sm leading-5 text-[#617069]">
+                            {reviewDraft.portionAssumption}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {reviewNumberFields.map((item) => (
                       <div key={item.field} className="space-y-1.5">
@@ -1309,6 +1363,17 @@ export function NutritionDiary() {
                       className="min-h-20 resize-none border-[#cfd9d3] bg-[#fbfcfb]"
                     />
                   </div>
+                  {reviewDraft.evidenceSummary ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="review-evidence">Факты агента</Label>
+                      <Textarea
+                        id="review-evidence"
+                        value={reviewDraft.evidenceSummary}
+                        readOnly
+                        className="min-h-20 resize-none border-[#cfd9d3] bg-[#fbfcfb]"
+                      />
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -1372,6 +1437,16 @@ export function NutritionDiary() {
                       {meal.recommendation ? (
                         <p className="mt-2 rounded-lg bg-[#f7eee9] px-3 py-2 text-sm leading-5 text-[#704037]">
                           {meal.recommendation}
+                        </p>
+                      ) : null}
+                      {meal.agentSummary ? (
+                        <p className="mt-2 rounded-lg bg-[#eef2f8] px-3 py-2 text-sm leading-5 text-[#263f78]">
+                          Агент: {meal.agentSummary}
+                        </p>
+                      ) : null}
+                      {meal.portionAssumption ? (
+                        <p className="mt-1 text-sm leading-5 text-[#617069]">
+                          Порция: {meal.portionAssumption}
                         </p>
                       ) : null}
                       {meal.photoName ? (

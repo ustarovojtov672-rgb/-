@@ -49,6 +49,10 @@ export const MealEntry = co.map({
   potassiumMilligrams: z.number(),
   confidencePercent: z.number().optional(),
   recommendation: z.string().optional(),
+  portionAssumption: z.string().optional(),
+  agentSummary: z.string().optional(),
+  evidenceSummary: z.string().optional(),
+  sourceUrls: z.string().optional(),
 });
 
 export const MealEntries = co.list(MealEntry);
