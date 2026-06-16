@@ -10,11 +10,12 @@ import type {
   NutritionProfileData,
   NutritionTargets,
 } from "@/lib/nutrition/targets";
+import type { PreviousMealSnapshot } from "@/lib/nutrition-agent/memory";
 import {
-  findSimilarMeals,
-  type PreviousMealSnapshot,
-} from "@/lib/nutrition-agent/memory";
-import { searchLocalFoodDatabase } from "@/lib/nutrition-agent/product-database";
+  buildNutritionAgentToolPlan,
+  summarizeToolPlanForPrompt,
+  type NutritionAgentToolPlan,
+} from "@/lib/nutrition-agent/tool-plan";
 
 type NutritionAgentGoal = {
   id: GoalId;
@@ -44,11 +45,11 @@ export async function analyzeMealWithNutritionAgent({
     throw new Error("OPENAI_API_KEY не задан на сервере.");
   }
 
-  const memoryMatches = findSimilarMeals({
-    query: description,
+  const toolPlan = buildNutritionAgentToolPlan({
+    description,
+    hasPhoto: photoFile !== null,
     previousMeals,
   });
-  const databaseMatches = searchLocalFoodDatabase(description);
   const content: Array<
     | { type: "input_text"; text: string }
     | { type: "input_image"; image_url: string; detail: "low" }
@@ -61,8 +62,7 @@ export async function analyzeMealWithNutritionAgent({
         goal,
         targets,
         previousMeals,
-        memoryMatches,
-        databaseMatches,
+        toolPlan,
         hasPhoto: photoFile !== null,
       }),
     },
@@ -129,8 +129,7 @@ function buildAgentPrompt({
   goal,
   targets,
   previousMeals,
-  memoryMatches,
-  databaseMatches,
+  toolPlan,
   hasPhoto,
 }: {
   description: string;
@@ -138,8 +137,7 @@ function buildAgentPrompt({
   goal: NutritionAgentGoal;
   targets: NutritionTargets;
   previousMeals: PreviousMealSnapshot[];
-  memoryMatches: ReturnType<typeof findSimilarMeals>;
-  databaseMatches: ReturnType<typeof searchLocalFoodDatabase>;
+  toolPlan: NutritionAgentToolPlan;
   hasPhoto: boolean;
 }) {
   return [
@@ -150,14 +148,8 @@ function buildAgentPrompt({
     `Профиль: ${profile.biologicalSex}, ${profile.ageYears} лет, ${profile.heightCentimeters} см, ${profile.weightKilograms} кг, активность ${profile.activityLevel}.`,
     `Дневные ориентиры: ${targets.calories} ккал, белок ${targets.protein} г, жиры ${targets.fat} г, углеводы ${targets.carbs} г, клетчатка ${targets.fiber} г, железо ${targets.iron} мг, калий ${targets.potassium} мг.`,
     "",
-    "Доступные инструменты и память:",
-    "- user_text: используй явный текст пользователя.",
-    "- vision: распознай еду и размер порции на фото.",
-    "- ocr: если на фото упаковка или этикетка, прочитай название, состав, БЖУ и массу.",
-    "- barcode: если виден штрихкод или цифры под ним, попробуй прочитать код через зрение/OCR.",
-    "- memory: проверь похожие прошлые приемы пользователя ниже.",
-    "- local_database: проверь локальные совпадения ниже.",
-    "- web_search: используй встроенный web search, если это бренд, ресторан, упаковка, меню или если данных из фото/памяти/локальной базы не хватает.",
+    "План инструментов:",
+    JSON.stringify(summarizeToolPlanForPrompt(toolPlan)),
     "",
     "Правила решения:",
     "- Если память дает точное совпадение с похожей едой, используй ее как сильный ориентир и отметь memory.",
@@ -168,9 +160,9 @@ function buildAgentPrompt({
     "- portionAssumption должен коротко объяснять массу или порцию, на которой основан расчет.",
     "- agentSummary должен коротко сказать, какой путь проверки выбран.",
     "",
-    `Похожие прошлые приемы: ${JSON.stringify(memoryMatches)}`,
+    `Похожие прошлые приемы: ${JSON.stringify(toolPlan.memoryMatches)}`,
     `Последние приемы для контекста: ${JSON.stringify(previousMeals.slice(0, 8))}`,
-    `Локальные совпадения базы продуктов: ${JSON.stringify(databaseMatches)}`,
+    `Локальные совпадения базы продуктов: ${JSON.stringify(toolPlan.databaseMatches)}`,
   ].join("\n");
 }
 

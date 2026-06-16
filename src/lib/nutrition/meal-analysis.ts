@@ -1,15 +1,29 @@
 import { z } from "zod";
 
+export const MealAnalysisToolSchema = z.enum([
+  "vision",
+  "ocr",
+  "barcode",
+  "memory",
+  "local_database",
+  "web_search",
+  "user_text",
+]);
+
+export type MealAnalysisTool = z.infer<typeof MealAnalysisToolSchema>;
+
+export const mealAnalysisToolLabels: Record<MealAnalysisTool, string> = {
+  vision: "зрение",
+  ocr: "чтение этикетки",
+  barcode: "штрихкод",
+  memory: "память",
+  local_database: "база продуктов",
+  web_search: "поиск",
+  user_text: "текст",
+};
+
 export const MealAnalysisEvidenceSchema = z.object({
-  kind: z.enum([
-    "vision",
-    "ocr",
-    "barcode",
-    "memory",
-    "local_database",
-    "web_search",
-    "user_text",
-  ]),
+  kind: MealAnalysisToolSchema,
   label: z.string(),
   detail: z.string(),
   sourceUrl: z.string().optional(),
@@ -30,19 +44,7 @@ export const MealAnalysisSchema = z.object({
   identifiedFoods: z.array(z.string()).max(8),
   portionAssumption: z.string(),
   agentSummary: z.string(),
-  usedTools: z
-    .array(
-      z.enum([
-        "vision",
-        "ocr",
-        "barcode",
-        "memory",
-        "local_database",
-        "web_search",
-        "user_text",
-      ]),
-    )
-    .max(8),
+  usedTools: z.array(MealAnalysisToolSchema).max(8),
   evidence: z.array(MealAnalysisEvidenceSchema).max(10),
   sourceUrls: z.array(z.string()).max(8),
   needsUserReview: z.boolean(),

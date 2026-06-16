@@ -32,9 +32,10 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { MealEntry, NutritionAccount } from "@/lib/jazz/schema";
-import type {
-  MealAnalysisResponse,
-  MealAnalysisResult,
+import {
+  mealAnalysisToolLabels,
+  type MealAnalysisResponse,
+  type MealAnalysisResult,
 } from "@/lib/nutrition/meal-analysis";
 import {
   activityLabels,
@@ -79,8 +80,11 @@ type MealDraft = {
   recommendation?: string;
   portionAssumption?: string;
   agentSummary?: string;
+  usedToolsSummary?: string;
+  identifiedFoodsSummary?: string;
   evidenceSummary?: string;
   sourceUrls?: string;
+  needsUserReview?: boolean;
 };
 
 type ReviewNumberField =
@@ -502,10 +506,15 @@ function mealDraftFromAnalysis({
     recommendation: analysis.recommendation,
     portionAssumption: analysis.portionAssumption,
     agentSummary: analysis.agentSummary,
+    usedToolsSummary: analysis.usedTools
+      .map((tool) => mealAnalysisToolLabels[tool])
+      .join("\n"),
+    identifiedFoodsSummary: analysis.identifiedFoods.join("\n"),
     evidenceSummary: analysis.evidence
       .map((item) => `${item.label}: ${item.detail}`)
       .join("\n"),
     sourceUrls: analysis.sourceUrls.join("\n"),
+    needsUserReview: analysis.needsUserReview,
   };
 
   if (photoName) {
@@ -589,6 +598,74 @@ function formatJournalDate(dateIso: string) {
     day: "numeric",
     month: "long",
   });
+}
+
+function splitStoredLines(value: string | undefined) {
+  return (
+    value
+      ?.split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+  );
+}
+
+function SummaryChips({
+  value,
+  tone = "neutral",
+}: {
+  value: string | undefined;
+  tone?: "neutral" | "agent";
+}) {
+  const items = splitStoredLines(value);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((item) => (
+        <span
+          key={item}
+          className={cn(
+            "rounded-lg px-2 py-1 text-sm",
+            tone === "agent"
+              ? "bg-[#e9edf7] text-[#263f78]"
+              : "bg-[#edf3ef] text-[#53625b]",
+          )}
+        >
+          {item}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SourceLinks({ value }: { value: string | undefined }) {
+  const urls = splitStoredLines(value);
+
+  if (urls.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-sm font-medium text-[#26302c]">Источники</p>
+      <div className="grid gap-1.5">
+        {urls.map((url) => (
+          <a
+            key={url}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all text-sm leading-5 text-[#2f6993] underline-offset-4 hover:underline"
+          >
+            {url}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function MacroBar({
@@ -1327,6 +1404,37 @@ export function NutritionDiary() {
                       ) : null}
                     </div>
                   ) : null}
+                  {reviewDraft.needsUserReview ? (
+                    <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
+                      Агент просит проверить порцию или состав перед сохранением.
+                    </div>
+                  ) : null}
+                  {reviewDraft.usedToolsSummary ||
+                  reviewDraft.identifiedFoodsSummary ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {reviewDraft.usedToolsSummary ? (
+                        <div className="space-y-2 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                          <p className="text-sm font-medium text-[#26302c]">
+                            Инструменты
+                          </p>
+                          <SummaryChips
+                            value={reviewDraft.usedToolsSummary}
+                            tone="agent"
+                          />
+                        </div>
+                      ) : null}
+                      {reviewDraft.identifiedFoodsSummary ? (
+                        <div className="space-y-2 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                          <p className="text-sm font-medium text-[#26302c]">
+                            Найденная еда
+                          </p>
+                          <SummaryChips
+                            value={reviewDraft.identifiedFoodsSummary}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {reviewNumberFields.map((item) => (
                       <div key={item.field} className="space-y-1.5">
@@ -1374,6 +1482,7 @@ export function NutritionDiary() {
                       />
                     </div>
                   ) : null}
+                  <SourceLinks value={reviewDraft.sourceUrls} />
                 </div>
 
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -1444,10 +1553,33 @@ export function NutritionDiary() {
                           Агент: {meal.agentSummary}
                         </p>
                       ) : null}
+                      {meal.needsUserReview ? (
+                        <p className="mt-2 rounded-lg bg-[#fff8f4] px-3 py-2 text-sm leading-5 text-[#704037]">
+                          Нужна проверка порции.
+                        </p>
+                      ) : null}
                       {meal.portionAssumption ? (
                         <p className="mt-1 text-sm leading-5 text-[#617069]">
                           Порция: {meal.portionAssumption}
                         </p>
+                      ) : null}
+                      {meal.usedToolsSummary ? (
+                        <div className="mt-2">
+                          <SummaryChips
+                            value={meal.usedToolsSummary}
+                            tone="agent"
+                          />
+                        </div>
+                      ) : null}
+                      {meal.identifiedFoodsSummary ? (
+                        <div className="mt-2">
+                          <SummaryChips value={meal.identifiedFoodsSummary} />
+                        </div>
+                      ) : null}
+                      {meal.sourceUrls ? (
+                        <div className="mt-2">
+                          <SourceLinks value={meal.sourceUrls} />
+                        </div>
                       ) : null}
                       {meal.photoName ? (
                         <p className="mt-1 text-sm leading-5 text-[#617069]">

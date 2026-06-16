@@ -51,8 +51,11 @@ export const MealEntry = co.map({
   recommendation: z.string().optional(),
   portionAssumption: z.string().optional(),
   agentSummary: z.string().optional(),
+  usedToolsSummary: z.string().optional(),
+  identifiedFoodsSummary: z.string().optional(),
   evidenceSummary: z.string().optional(),
   sourceUrls: z.string().optional(),
+  needsUserReview: z.boolean().optional(),
 });
 
 export const MealEntries = co.list(MealEntry);
