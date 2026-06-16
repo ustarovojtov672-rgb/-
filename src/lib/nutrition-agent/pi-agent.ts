@@ -28,6 +28,20 @@ type PiToolStartEvent = {
   toolName: string;
 };
 
+type PiAssistantMessage = {
+  role: "assistant";
+  content?: Array<{ type: string; text?: string }>;
+  stopReason?: string;
+  errorMessage?: string;
+};
+
+const piSupportedImageMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
 export async function analyzeMealWithPiNutritionAgent({
   description,
   photoFile,
@@ -73,7 +87,7 @@ export async function analyzeMealWithPiNutritionAgent({
 
   if (!modelRegistry.hasConfiguredAuth(model)) {
     throw new Error(
-      "Pi-агент питания не залогинен. Запусти npm run nutrition-agent:login, затем внутри Pi выполни /login openai-codex.",
+      "Pi-агент питания не получил Codex-авторизацию. Запусти npm run nutrition-agent:sync-codex-auth или npm run nutrition-agent:login.",
     );
   }
 
@@ -155,7 +169,17 @@ export async function analyzeMealWithPiNutritionAgent({
       images: photoFile ? [await fileToPiImageContent(photoFile)] : undefined,
     });
 
-    const parsed = parsePiJson(assistantText);
+    const finalAssistantMessage = getLastAssistantMessage(session.state);
+
+    if (
+      finalAssistantMessage?.stopReason === "error" ||
+      finalAssistantMessage?.stopReason === "aborted"
+    ) {
+      throw new Error(formatPiAssistantError(finalAssistantMessage));
+    }
+
+    const finalText = assistantText || readAssistantText(finalAssistantMessage);
+    const parsed = parsePiJson(finalText);
     const result = MealAnalysisSchema.parse(parsed);
 
     return {
@@ -180,18 +204,99 @@ function buildPiPrompt(prompt: string) {
 async function fileToPiImageContent(file: File): Promise<PiImageContent> {
   const bytes = Buffer.from(await file.arrayBuffer());
 
-  return {
-    type: "image",
-    data: bytes.toString("base64"),
-    mimeType: file.type,
-  };
+  if (piSupportedImageMimeTypes.has(file.type)) {
+    return {
+      type: "image",
+      data: bytes.toString("base64"),
+      mimeType: file.type,
+    };
+  }
+
+  try {
+    const sharp = (await import("sharp")).default;
+    const jpeg = await sharp(bytes)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+
+    return {
+      type: "image",
+      data: jpeg.toString("base64"),
+      mimeType: "image/jpeg",
+    };
+  } catch (error) {
+    throw new Error(
+      `Фото в формате ${file.type || "unknown"} не удалось подготовить для Pi-агента: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+function getLastAssistantMessage(state: unknown): PiAssistantMessage | null {
+  if (
+    typeof state !== "object" ||
+    state === null ||
+    !("messages" in state) ||
+    !Array.isArray(state.messages)
+  ) {
+    return null;
+  }
+
+  for (let index = state.messages.length - 1; index >= 0; index--) {
+    const message = state.messages[index];
+
+    if (isPiAssistantMessage(message)) {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+function isPiAssistantMessage(value: unknown): value is PiAssistantMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "role" in value &&
+    value.role === "assistant"
+  );
+}
+
+function readAssistantText(message: PiAssistantMessage | null) {
+  if (!message?.content) {
+    return "";
+  }
+
+  return message.content
+    .filter((content) => content.type === "text" && typeof content.text === "string")
+    .map((content) => content.text)
+    .join("");
+}
+
+function formatPiAssistantError(message: PiAssistantMessage) {
+  const errorMessage = message.errorMessage?.trim();
+
+  if (!errorMessage) {
+    return `Pi-агент питания завершился со статусом ${message.stopReason}.`;
+  }
+
+  if (
+    errorMessage.includes("valid image") ||
+    errorMessage.includes("supported image formats")
+  ) {
+    return "Фото было в формате, который модель не приняла. Сервер попробовал подготовить его заново, но модель всё равно вернула ошибку изображения.";
+  }
+
+  return errorMessage;
 }
 
 function parsePiJson(value: string) {
   const trimmed = value.trim();
 
   if (!trimmed) {
-    throw new Error("Pi-агент питания не вернул ответ.");
+    throw new Error("Pi-агент питания не вернул текстовый ответ.");
   }
 
   try {
