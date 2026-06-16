@@ -1,0 +1,14 @@
+{
+  "runtime": "pi-coding-agent",
+  "provider": "openai-codex",
+  "model": "openai-codex/gpt-5.5",
+  "requiredProjectPackage": "npm:pi-codex-search",
+  "requiredTool": "codex_search",
+  "requiredSkill": "skills/codex-search/SKILL.md",
+  "auth": {
+    "type": "pi-openai-codex-oauth",
+    "loginCommandInsidePi": "/login openai-codex",
+    "localAuthDirectory": ".pi-agent"
+  },
+  "sessionsDirectory": "sessions"
+}

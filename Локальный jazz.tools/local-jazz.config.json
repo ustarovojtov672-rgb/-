@@ -1,0 +1,10 @@
+{
+  "package": "jazz-tools",
+  "mode": "local",
+  "storage": "indexedDB",
+  "sync": {
+    "when": "never"
+  },
+  "schema": "../src/lib/jazz/schema.ts",
+  "provider": "../src/components/local-jazz-provider.tsx"
+}

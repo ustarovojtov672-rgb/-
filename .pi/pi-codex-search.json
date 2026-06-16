@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "toolName": "codex_search",
+  "searchContextSize": "medium",
+  "freshness": "live"
+}
