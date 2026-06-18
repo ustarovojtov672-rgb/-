@@ -18,8 +18,8 @@ cap-sync:
 pi-codex-search:
   npm run pi:install-codex-search
 
-agent-login:
-  npm run agent:login
+nutrition-agent-login:
+  npm run nutrition-agent:login
 
-agent-search:
-  npm run agent:search
+nutrition-agent-run:
+  npm run nutrition-agent:run

@@ -120,7 +120,7 @@ export async function analyzeMealWithPiNutritionAgent({
     settingsManager,
     additionalSkillPaths: [
       path.join(agentWorkspace, "skills", "nutrition-agent"),
-      path.join(projectDir, "Аi агент для поиска", "skills", "codex-search"),
+      path.join(agentWorkspace, "skills", "codex-search"),
     ],
     noPromptTemplates: true,
     noThemes: true,

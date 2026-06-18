@@ -3,7 +3,6 @@ set -euo pipefail
 
 AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_DIR="$(cd "$AGENT_DIR/.." && pwd -P)"
-SEARCH_SKILL="$PROJECT_DIR/Аi агент для поиска/skills/codex-search"
 
 export PI_CODING_AGENT_DIR="$AGENT_DIR/.pi-agent"
 export PI_CODING_AGENT_SESSION_DIR="$AGENT_DIR/sessions"
@@ -24,7 +23,7 @@ npm exec -- pi \
   --model openai-codex/gpt-5.5 \
   --tools read,grep,find,ls,codex_search \
   --skill "$AGENT_DIR/skills/nutrition-agent" \
-  --skill "$SEARCH_SKILL" \
+  --skill "$AGENT_DIR/skills/codex-search" \
   --session-dir "$PI_CODING_AGENT_SESSION_DIR" \
   --approve \
   --name "AI агент питания" \

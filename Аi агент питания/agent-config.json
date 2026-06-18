@@ -6,7 +6,7 @@
   "mode": "print",
   "requiredSkills": [
     "skills/nutrition-agent/SKILL.md",
-    "../Аi агент для поиска/skills/codex-search/SKILL.md"
+    "skills/codex-search/SKILL.md"
   ],
   "memoryInputs": [
     "Jazz MealEntry history",
