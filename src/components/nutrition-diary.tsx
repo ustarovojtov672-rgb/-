@@ -80,6 +80,7 @@ type AnalysisPhase =
   | "idle"
   | "checking"
   | "analyzing"
+  | "refining"
   | "review"
   | "failed"
   | "saving";
@@ -285,6 +286,7 @@ const mealAnalysisEndpoint =
 const mealAgentStatusEndpoint = mealAnalysisEndpoint;
 const syncSaveTimeoutMs = 10000;
 const mealMemoryLimit = 50;
+const reviewClarificationMaxLength = 600;
 const reviewNumberFields: Array<{
   field: ReviewNumberField;
   label: string;
@@ -592,6 +594,57 @@ function mealDraftFromAnalysis({
   }
 
   return draft;
+}
+
+function sourceFromInput({
+  hasText,
+  hasPhoto,
+}: {
+  hasText: boolean;
+  hasPhoto: boolean;
+}): MealSource {
+  if (hasPhoto && hasText) {
+    return "text-photo";
+  }
+
+  if (hasPhoto) {
+    return "photo";
+  }
+
+  return "text";
+}
+
+function buildReviewClarificationPrompt({
+  originalText,
+  clarification,
+  draft,
+}: {
+  originalText: string;
+  clarification: string;
+  draft: MealDraft;
+}) {
+  return [
+    "Уточнение к текущему AI-расчету еды.",
+    `Исходный ввод пользователя: ${originalText || "текста не было"}.`,
+    `Текущий черновик: ${JSON.stringify({
+      title: draft.title,
+      detail: draft.detail,
+      caloriesKcal: draft.caloriesKcal,
+      proteinGrams: draft.proteinGrams,
+      fatGrams: draft.fatGrams,
+      carbsGrams: draft.carbsGrams,
+      fiberGrams: draft.fiberGrams,
+      ironMilligrams: draft.ironMilligrams,
+      potassiumMilligrams: draft.potassiumMilligrams,
+      portionAssumption: draft.portionAssumption,
+      identifiedFoodsSummary: draft.identifiedFoodsSummary,
+      evidenceSummary: draft.evidenceSummary,
+      confidenceSignalsSummary: draft.confidenceSignalsSummary,
+      needsUserReview: draft.needsUserReview,
+    })}`,
+    `Новое уточнение пользователя: ${clarification}.`,
+    "Пересчитай текущий прием пищи с учетом уточнения. Если фото приложено, используй то же фото заново.",
+  ].join("\n");
 }
 
 async function analyzeMeal({
@@ -1110,6 +1163,14 @@ function AnalysisStateBanner({
     );
   }
 
+  if (phase === "refining") {
+    return (
+      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
+        Агент пересчитывает черновик с учетом уточнения.
+      </div>
+    );
+  }
+
   if (phase === "review") {
     return (
       <div className="rounded-lg border border-[#c9ddcf] bg-[#edf3ef] p-3 text-sm leading-5 text-[#225b43]">
@@ -1264,6 +1325,7 @@ export function NutritionDiary() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoInputKey, setPhotoInputKey] = useState(0);
   const [reviewDraft, setReviewDraft] = useState<MealDraft | null>(null);
+  const [reviewClarification, setReviewClarification] = useState("");
   const [isMealBusy, setIsMealBusy] = useState(false);
   const [isPhotoDragActive, setIsPhotoDragActive] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
@@ -1489,6 +1551,7 @@ export function NutritionDiary() {
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setReviewDraft(null);
+    setReviewClarification("");
     setAnalysisError("");
     setAnalysisPhase("idle");
     setStatus("Фото добавлено. Нажми «Добавить», чтобы запустить анализ.");
@@ -1592,6 +1655,7 @@ export function NutritionDiary() {
 
   function clearMealComposer() {
     setMealText("");
+    setReviewClarification("");
     clearPhotoDraft();
   }
 
@@ -1643,11 +1707,12 @@ export function NutritionDiary() {
 
       const mealDraft = mealDraftFromAnalysis({
         analysis,
-        source: hasPhoto && hasText ? "text-photo" : hasPhoto ? "photo" : "text",
+        source: sourceFromInput({ hasText, hasPhoto }),
         photoName,
       });
 
       setReviewDraft(mealDraft);
+      setReviewClarification("");
       setAnalysisPhase("review");
       setStatus("Проверь AI-расчет перед сохранением.");
     } catch (error) {
@@ -1657,6 +1722,71 @@ export function NutritionDiary() {
       setAnalysisError(message);
       setAnalysisPhase("failed");
       setStatus("AI-анализ не прошел.");
+      void refreshAgentStatus();
+    } finally {
+      setIsMealBusy(false);
+    }
+  }
+
+  async function handleReviewClarification() {
+    if (!reviewDraft) {
+      throw new Error("Review draft is missing.");
+    }
+
+    const clarification = reviewClarification.trim();
+
+    if (!clarification) {
+      setAnalysisError("Напиши, что нужно уточнить в расчете.");
+      setAnalysisPhase("failed");
+      setStatus("Уточнение не отправлено: текст пустой.");
+      return;
+    }
+
+    if (agentStatus?.ok === false) {
+      setAnalysisError("AI-агент не готов. Исправь красные пункты в диагностике.");
+      setAnalysisPhase("failed");
+      setStatus("Уточнение не запущено: агент не готов.");
+      return;
+    }
+
+    const hasText = mealText.trim().length > 0 || clarification.length > 0;
+    const hasPhoto = photoFile !== null;
+
+    setIsMealBusy(true);
+    setAnalysisError("");
+    setAnalysisPhase("refining");
+    setStatus("Уточняем AI-расчет.");
+
+    try {
+      const analysis = await analyzeMeal({
+        text: buildReviewClarificationPrompt({
+          originalText: mealText,
+          clarification,
+          draft: reviewDraft,
+        }),
+        photoFile,
+        profile: nutritionProfile,
+        goal,
+        mealMemory: mealMemorySnapshots,
+        previousMeals: meals,
+      });
+      const refinedDraft = mealDraftFromAnalysis({
+        analysis,
+        source: sourceFromInput({ hasText, hasPhoto }),
+        photoName,
+      });
+
+      setReviewDraft(refinedDraft);
+      setReviewClarification("");
+      setAnalysisPhase("review");
+      setStatus("Расчет уточнен. Проверь перед сохранением.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "AI-уточнение не прошло.";
+
+      setAnalysisError(message);
+      setAnalysisPhase("failed");
+      setStatus("AI-уточнение не прошло.");
       void refreshAgentStatus();
     } finally {
       setIsMealBusy(false);
@@ -1786,6 +1916,7 @@ export function NutritionDiary() {
 
   function cancelReviewDraft() {
     setReviewDraft(null);
+    setReviewClarification("");
     setAnalysisError("");
     setAnalysisPhase("idle");
     setStatus("AI-расчет отменен.");
@@ -2366,6 +2497,34 @@ export function NutritionDiary() {
                   <ConfidenceSignals
                     value={reviewDraft.confidenceSignalsSummary}
                   />
+                  <div className="space-y-2 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                    <Label htmlFor="review-clarification">Уточнение</Label>
+                    <Textarea
+                      id="review-clarification"
+                      value={reviewClarification}
+                      maxLength={reviewClarificationMaxLength}
+                      onChange={(event) =>
+                        setReviewClarification(event.currentTarget.value)
+                      }
+                      placeholder="Например: это было 250 г, соус отдельно, это рыба, не курица"
+                      className="min-h-20 resize-none border-[#cfd9d3] bg-white"
+                    />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm leading-5 text-[#617069]">
+                        Агент пересчитает этот черновик с тем же фото.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 gap-2 px-4"
+                        disabled={isMealBusy || !reviewClarification.trim()}
+                        onClick={handleReviewClarification}
+                      >
+                        Уточнить
+                        <RefreshCw className="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </div>
                   {reviewMemoryMatches.length > 0 ? (
                     <div className="space-y-3 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
                       <div className="flex items-center gap-2">
