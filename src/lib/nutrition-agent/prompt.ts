@@ -39,12 +39,13 @@ export function buildNutritionAgentPrompt({
   hasPhoto,
 }: NutritionAgentPromptInput) {
   const bestDatabaseMatch = toolPlan.databaseMatches[0] ?? null;
+  const goalDescription = goalDescriptions[goal.id];
 
   return [
     "Задача: оценить только текущий прием пищи.",
     `Ввод пользователя: ${description || "текста нет"}.`,
     `Фото приложено: ${hasPhoto ? "да" : "нет"}.`,
-    `Цель: ${goal.label} (${goal.id}).`,
+    `Цель: ${goal.label}; режим: ${goalDescription}.`,
     `Профиль: ${profile.biologicalSex}, ${profile.ageYears} лет, ${profile.heightCentimeters} см, ${profile.weightKilograms} кг, активность ${profile.activityLevel}.`,
     `Дневные ориентиры: ${targets.calories} ккал, белок ${targets.protein} г, жиры ${targets.fat} г, углеводы ${targets.carbs} г, клетчатка ${targets.fiber} г, железо ${targets.iron} мг, калий ${targets.potassium} мг.`,
     "",
@@ -65,6 +66,7 @@ export function buildNutritionAgentPrompt({
     "- portionAssumption должен коротко объяснять массу или порцию, на которой основан расчет.",
     "- agentSummary должен коротко сказать, какой путь проверки выбран.",
     "- confidenceSignals должен показать, на чем держится расчет: фото, текст, этикетка, штрихкод, память, база или поиск. Для каждого сигнала дай kind, короткий label, confidencePercent и detail.",
+    "- В пользовательских текстах не используй технические id целей balance, cut или bulk.",
     "- Верни только JSON без Markdown, пояснений до JSON и текста после JSON.",
     "",
     `Похожие прошлые приемы: ${JSON.stringify(toolPlan.memoryMatches)}`,
@@ -74,3 +76,9 @@ export function buildNutritionAgentPrompt({
     `Локальные совпадения базы продуктов: ${JSON.stringify(toolPlan.databaseMatches)}`,
   ].join("\n");
 }
+
+const goalDescriptions: Record<GoalId, string> = {
+  balance: "поддержание баланса",
+  cut: "похудение",
+  bulk: "набор массы",
+};

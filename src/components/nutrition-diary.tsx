@@ -202,6 +202,12 @@ const goals: Goal[] = [
   },
 ];
 
+const userFacingGoalWords: Record<GoalId, string> = {
+  balance: "баланса",
+  cut: "похудения",
+  bulk: "набора массы",
+};
+
 const mealProfiles: MealProfile[] = [
   {
     match: ["кур", "индей", "рыб", "лосос", "тунец", "яйц", "творог", "тофу"],
@@ -521,6 +527,22 @@ function recommendationFor(
   return "Баланс дня выглядит ровно: на следующий прием держи белок, овощи и спокойную порцию углеводов.";
 }
 
+function humanizeTechnicalGoalIds(text: string) {
+  return text
+    .replace(/\bbalance\b/gi, userFacingGoalWords.balance)
+    .replace(/\bcut\b/gi, userFacingGoalWords.cut)
+    .replace(/\bbulk\b/gi, userFacingGoalWords.bulk);
+}
+
+function cleanMealDraftUserText(draft: MealDraft): MealDraft {
+  return {
+    ...draft,
+    recommendation: draft.recommendation
+      ? humanizeTechnicalGoalIds(draft.recommendation)
+      : draft.recommendation,
+  };
+}
+
 function profileSnapshot(profile: NutritionProfileData): NutritionProfileData {
   return {
     biologicalSex: profile.biologicalSex,
@@ -580,7 +602,7 @@ function mealDraftFromAnalysis({
     confidencePercent: Math.round(
       normalizePositive(analysis.confidencePercent, "confidencePercent"),
     ),
-    recommendation: analysis.recommendation,
+    recommendation: humanizeTechnicalGoalIds(analysis.recommendation),
     portionAssumption: analysis.portionAssumption,
     agentSummary: analysis.agentSummary,
     usedToolsSummary: analysis.usedTools
@@ -688,7 +710,9 @@ async function analyzeMeal({
         fiberGrams: meal.fiberGrams,
         ironMilligrams: meal.ironMilligrams,
         potassiumMilligrams: meal.potassiumMilligrams,
-        recommendation: meal.recommendation,
+        recommendation: meal.recommendation
+          ? humanizeTechnicalGoalIds(meal.recommendation)
+          : meal.recommendation,
       })),
     ),
   );
@@ -1431,7 +1455,9 @@ export function NutritionDiary() {
   const latestMealRecommendation = meals.find(
     (meal) => meal.recommendation,
   )?.recommendation;
-  const recommendation = latestMealRecommendation ?? recommendationFor(goal, totals);
+  const recommendation = latestMealRecommendation
+    ? humanizeTechnicalGoalIds(latestMealRecommendation)
+    : recommendationFor(goal, totals);
   const caloriesLeft = goal.targets.calories - totals.calories;
   const nutrientGaps = buildNutrientGaps(totals, goal.targets);
   const strongestGap = nutrientGaps[0];
@@ -1855,8 +1881,9 @@ export function NutritionDiary() {
     );
 
     const savedAtIso = new Date().toISOString();
+    const draftToSave = cleanMealDraftUserText(reviewDraft);
     let mealDraft: Parameters<typeof MealEntry.create>[0] = {
-      ...reviewDraft,
+      ...draftToSave,
       eatenAtIso: savedAtIso,
     };
 
@@ -1882,7 +1909,7 @@ export function NutritionDiary() {
 
     try {
       const meal = MealEntry.create(mealDraft);
-      const memoryEntry = upsertConfirmedMealMemory(reviewDraft, savedAtIso);
+      const memoryEntry = upsertConfirmedMealMemory(draftToSave, savedAtIso);
       journal.meals.$jazz.push(meal);
 
       if (meal.photo) {
@@ -3059,7 +3086,7 @@ export function NutritionDiary() {
                             </div>
                             {meal.recommendation ? (
                               <p className="mt-3 rounded-lg bg-[#f7eee9] px-3 py-2 text-sm leading-5 text-[#704037]">
-                                {meal.recommendation}
+                                {humanizeTechnicalGoalIds(meal.recommendation)}
                               </p>
                             ) : null}
                             {meal.agentSummary ? (
