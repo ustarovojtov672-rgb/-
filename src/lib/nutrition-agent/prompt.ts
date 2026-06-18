@@ -38,6 +38,8 @@ export function buildNutritionAgentPrompt({
   toolPlan,
   hasPhoto,
 }: NutritionAgentPromptInput) {
+  const bestDatabaseMatch = toolPlan.databaseMatches[0] ?? null;
+
   return [
     "Задача: оценить только текущий прием пищи.",
     `Ввод пользователя: ${description || "текста нет"}.`,
@@ -51,17 +53,20 @@ export function buildNutritionAgentPrompt({
     "",
     "Правила решения:",
     "- Если память дает точное совпадение с похожей едой, используй ее как сильный ориентир и отметь memory.",
+    "- Если лучшее локальное совпадение базы продуктов не null, используй его как основной расчет для обычного продукта. Не возвращай неизвестный продукт при наличии локального совпадения.",
     "- Если на этикетке есть готовые БЖУ и масса, считай от них, а не по средним значениям.",
     "- Если использовал web_search, положи ссылки в sourceUrls и evidence.",
     "- Если порция не ясна, выбери обычную порцию, снизь confidencePercent и поставь needsUserReview=true.",
     "- identifiedFoods должен содержать конкретные продукты, а не общие категории.",
     "- portionAssumption должен коротко объяснять массу или порцию, на которой основан расчет.",
     "- agentSummary должен коротко сказать, какой путь проверки выбран.",
+    "- confidenceSignals должен показать, на чем держится расчет: фото, текст, этикетка, штрихкод, память, база или поиск. Для каждого сигнала дай kind, короткий label, confidencePercent и detail.",
     "- Верни только JSON без Markdown, пояснений до JSON и текста после JSON.",
     "",
     `Похожие прошлые приемы: ${JSON.stringify(toolPlan.memoryMatches)}`,
     `Подтвержденная память блюд: ${JSON.stringify(mealMemory.slice(0, 12))}`,
     `Последние приемы для контекста: ${JSON.stringify(previousMeals.slice(0, 8))}`,
+    `Лучшее локальное совпадение базы продуктов: ${JSON.stringify(bestDatabaseMatch)}`,
     `Локальные совпадения базы продуктов: ${JSON.stringify(toolPlan.databaseMatches)}`,
   ].join("\n");
 }

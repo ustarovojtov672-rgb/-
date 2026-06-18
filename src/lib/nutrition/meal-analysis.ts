@@ -29,6 +29,13 @@ export const MealAnalysisEvidenceSchema = z.object({
   sourceUrl: z.string().optional(),
 });
 
+export const MealAnalysisConfidenceSignalSchema = z.object({
+  kind: MealAnalysisToolSchema,
+  label: z.string(),
+  confidencePercent: z.number().min(0).max(100),
+  detail: z.string(),
+});
+
 export const MealAnalysisSchema = z.object({
   title: z.string(),
   detail: z.string(),
@@ -46,6 +53,7 @@ export const MealAnalysisSchema = z.object({
   agentSummary: z.string(),
   usedTools: z.array(MealAnalysisToolSchema).max(8),
   evidence: z.array(MealAnalysisEvidenceSchema).max(10),
+  confidenceSignals: z.array(MealAnalysisConfidenceSignalSchema).max(8),
   sourceUrls: z.array(z.string()).max(8),
   needsUserReview: z.boolean(),
 });

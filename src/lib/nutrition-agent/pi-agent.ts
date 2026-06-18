@@ -126,7 +126,7 @@ export async function analyzeMealWithPiNutritionAgent({
     noThemes: true,
     noContextFiles: true,
     systemPrompt:
-      "Ты локальный Pi-агент питания внутри приложения. Рассчитывай еду по тексту и фото через память, OCR, штрихкод, локальную базу и codex_search. Отвечай только JSON по контракту приложения.",
+      "Ты локальный Pi-агент питания внутри приложения. Рассчитывай еду по тексту и фото через память, OCR, штрихкод, локальную базу и codex_search. Отвечай только JSON по контракту приложения и заполняй confidenceSignals для сильных источников уверенности.",
   });
 
   await resourceLoader.reload({

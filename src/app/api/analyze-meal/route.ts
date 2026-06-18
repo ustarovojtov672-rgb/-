@@ -260,6 +260,10 @@ function buildPiStatusChecks(): MealAgentStatusCheck[] {
     "pi-codex-search",
     "package.json",
   );
+  const hasPiAuth = existsSync(authPath);
+  const hasNutritionSkill = existsSync(nutritionSkillPath);
+  const hasSearchSkill = existsSync(searchSkillPath);
+  const hasCodexSearchTool = existsSync(codexSearchPackagePath);
 
   return [
     {
@@ -268,43 +272,43 @@ function buildPiStatusChecks(): MealAgentStatusCheck[] {
       ok: true,
       detail: "Используется локальный Pi-агент питания.",
     },
-    {
+    agentStatusCheck({
       id: "pi-auth",
       label: "Codex auth",
-      ok: existsSync(authPath),
-      detail: existsSync(authPath)
+      ok: hasPiAuth,
+      detail: hasPiAuth
         ? "Локальная авторизация Pi найдена."
         : "Локальная авторизация Pi не найдена.",
       action:
         "Запусти npm run nutrition-agent:sync-codex-auth или npm run nutrition-agent:login.",
-    },
-    {
+    }),
+    agentStatusCheck({
       id: "nutrition-skill",
       label: "Nutrition skill",
-      ok: existsSync(nutritionSkillPath),
-      detail: existsSync(nutritionSkillPath)
+      ok: hasNutritionSkill,
+      detail: hasNutritionSkill
         ? "Основной skill агента питания найден."
         : "Основной skill агента питания отсутствует.",
       action: "Проверь папку Аi агент питания/skills/nutrition-agent.",
-    },
-    {
+    }),
+    agentStatusCheck({
       id: "search-skill",
       label: "Web search skill",
-      ok: existsSync(searchSkillPath),
-      detail: existsSync(searchSkillPath)
+      ok: hasSearchSkill,
+      detail: hasSearchSkill
         ? "Search skill встроен в агента питания."
         : "Search skill не найден внутри агента питания.",
       action: "Проверь папку Аi агент питания/skills/codex-search.",
-    },
-    {
+    }),
+    agentStatusCheck({
       id: "codex-search-tool",
       label: "codex_search",
-      ok: existsSync(codexSearchPackagePath),
-      detail: existsSync(codexSearchPackagePath)
+      ok: hasCodexSearchTool,
+      detail: hasCodexSearchTool
         ? "Project-local пакет pi-codex-search установлен."
         : "Project-local пакет pi-codex-search не установлен.",
       action: "Запусти npm run pi:install-codex-search.",
-    },
+    }),
   ];
 }
 
@@ -318,14 +322,31 @@ function buildOpenAiStatusChecks(): MealAgentStatusCheck[] {
       ok: true,
       detail: "Используется прямой OpenAI runtime.",
     },
-    {
+    agentStatusCheck({
       id: "openai-key",
       label: "OpenAI API key",
       ok: hasApiKey,
       detail: hasApiKey ? "OPENAI_API_KEY задан." : "OPENAI_API_KEY не задан.",
       action: "Добавь OPENAI_API_KEY в .env.local и перезапусти npm run dev.",
-    },
+    }),
   ];
+}
+
+function agentStatusCheck(check: MealAgentStatusCheck): MealAgentStatusCheck {
+  if (check.ok) {
+    return {
+      id: check.id,
+      label: check.label,
+      ok: true,
+      detail: check.detail,
+    };
+  }
+
+  if (!check.action) {
+    throw new Error(`Status check ${check.id} is missing a recovery action.`);
+  }
+
+  return check;
 }
 
 async function analyzeMeal({

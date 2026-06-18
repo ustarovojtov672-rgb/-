@@ -57,6 +57,7 @@ import {
   type MealAgentStatusResponse,
   type MealAnalysisResponse,
   type MealAnalysisResult,
+  type MealAnalysisTool,
 } from "@/lib/nutrition/meal-analysis";
 import type { MealMemorySnapshot } from "@/lib/nutrition-agent/memory";
 import {
@@ -113,6 +114,7 @@ type MealDraft = {
   usedToolsSummary?: string;
   identifiedFoodsSummary?: string;
   evidenceSummary?: string;
+  confidenceSignalsSummary?: string;
   sourceUrls?: string;
   needsUserReview?: boolean;
 };
@@ -264,6 +266,16 @@ const sourceLabels: Record<MealSource, string> = {
   text: "текст",
   photo: "фото",
   "text-photo": "текст и фото",
+};
+
+const confidenceSignalLabels: Record<MealAnalysisTool, string> = {
+  vision: "фото",
+  ocr: "этикетка",
+  barcode: "штрихкод",
+  memory: "память",
+  local_database: "база продуктов",
+  web_search: "поиск",
+  user_text: "текст",
 };
 
 const biologicalSexOptions: BiologicalSex[] = ["female", "male"];
@@ -519,6 +531,20 @@ function normalizePositive(value: number, field: string) {
   return Math.round(value * 10) / 10;
 }
 
+function buildConfidenceSignalsSummary(analysis: MealAnalysisResult) {
+  return analysis.confidenceSignals
+    .map((signal) => {
+      const label =
+        signal.label.trim() || confidenceSignalLabels[signal.kind];
+      const confidencePercent = Math.round(
+        normalizePositive(signal.confidencePercent, "confidencePercent"),
+      );
+
+      return `${label}: ${confidencePercent}% - ${signal.detail}`;
+    })
+    .join("\n");
+}
+
 function mealDraftFromAnalysis({
   analysis,
   source,
@@ -556,6 +582,7 @@ function mealDraftFromAnalysis({
     evidenceSummary: analysis.evidence
       .map((item) => `${item.label}: ${item.detail}`)
       .join("\n"),
+    confidenceSignalsSummary: buildConfidenceSignalsSummary(analysis),
     sourceUrls: analysis.sourceUrls.join("\n"),
     needsUserReview: analysis.needsUserReview,
   };
@@ -852,6 +879,73 @@ function SummaryChips({
   );
 }
 
+function parseConfidenceSignalLine(line: string) {
+  const labelEnd = line.indexOf(": ");
+  const percentEnd = line.indexOf("% - ", labelEnd + 2);
+
+  if (labelEnd <= 0 || percentEnd <= labelEnd) {
+    throw new Error(`Invalid confidence signal line: ${line}`);
+  }
+
+  const confidencePercent = Number(line.slice(labelEnd + 2, percentEnd));
+
+  if (
+    !Number.isFinite(confidencePercent) ||
+    confidencePercent < 0 ||
+    confidencePercent > 100
+  ) {
+    throw new Error(`Invalid confidence signal percent: ${line}`);
+  }
+
+  return {
+    label: line.slice(0, labelEnd),
+    confidencePercent,
+    detail: line.slice(percentEnd + 4),
+  };
+}
+
+function ConfidenceSignals({ value }: { value: string | undefined }) {
+  const items = splitStoredLines(value).map(parseConfidenceSignalLine);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-[#26302c]">
+        Источники уверенности
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {items.map((item, index) => (
+          <div
+            key={`${item.label}-${index}`}
+            className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="min-w-0 break-words text-sm font-medium text-[#26302c]">
+                {item.label}
+              </p>
+              <span className="shrink-0 rounded-lg bg-[#e7f1eb] px-2 py-1 text-sm font-medium text-[#225b43]">
+                {item.confidencePercent}%
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-lg bg-[#dfe7e2]">
+              <div
+                className="h-full rounded-lg bg-[#225b43]"
+                style={{ width: `${item.confidencePercent}%` }}
+              />
+            </div>
+            <p className="mt-2 text-sm leading-5 text-[#617069]">
+              {item.detail}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SourceLinks({ value }: { value: string | undefined }) {
   const urls = splitStoredLines(value);
 
@@ -891,6 +985,7 @@ function AgentStatusPanel({
   onRefresh: () => void;
 }) {
   const isReady = status?.ok ?? false;
+  const isChecking = !status && isBusy && !error;
 
   return (
     <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
@@ -927,18 +1022,24 @@ function AgentStatusPanel({
           "mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
           isReady
             ? "bg-[#e7f1eb] text-[#225b43]"
-            : "bg-[#fff8f4] text-[#704037]",
+            : isChecking
+              ? "bg-[#eef2f8] text-[#263f78]"
+              : "bg-[#fff8f4] text-[#704037]",
         )}
       >
         {isReady ? (
           <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+        ) : isChecking ? (
+          <RefreshCw className="size-4 shrink-0 animate-spin" aria-hidden="true" />
         ) : (
           <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
         )}
         <span>
           {isReady
             ? "Готов к анализу еды."
-            : error || "Нужна проверка настроек агента."}
+            : isChecking
+              ? "Проверяем AI-агента."
+              : error || "Нужна проверка настроек агента."}
         </span>
       </div>
 
@@ -2262,6 +2363,9 @@ export function NutritionDiary() {
                       Агент просит проверить порцию или состав перед сохранением.
                     </div>
                   ) : null}
+                  <ConfidenceSignals
+                    value={reviewDraft.confidenceSignalsSummary}
+                  />
                   {reviewMemoryMatches.length > 0 ? (
                     <div className="space-y-3 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
                       <div className="flex items-center gap-2">
@@ -2448,6 +2552,13 @@ export function NutritionDiary() {
                         <p className="mt-1 text-sm leading-5 text-[#617069]">
                           Порция: {meal.portionAssumption}
                         </p>
+                      ) : null}
+                      {meal.confidenceSignalsSummary ? (
+                        <div className="mt-2">
+                          <ConfidenceSignals
+                            value={meal.confidenceSignalsSummary}
+                          />
+                        </div>
                       ) : null}
                       {meal.usedToolsSummary ? (
                         <div className="mt-2">

@@ -147,6 +147,19 @@ const localFoodDatabase: LocalFoodDatabaseEntry[] = [
     ironMilligrams: 0.3,
     potassiumMilligrams: 422,
   },
+  {
+    id: "apple-150g",
+    aliases: ["яблоко", "яблоки", "apple"],
+    title: "Яблоко",
+    serving: "150 г",
+    caloriesKcal: 78,
+    proteinGrams: 0.4,
+    fatGrams: 0.3,
+    carbsGrams: 20.7,
+    fiberGrams: 3.6,
+    ironMilligrams: 0.2,
+    potassiumMilligrams: 161,
+  },
 ];
 
 export function searchLocalFoodDatabase(query: string, limit = 5) {

@@ -44,6 +44,7 @@ Example tool call:
 ## How to answer
 
 - Return evidence back into the nutrition result, not a standalone web-search answer.
+- Add a `confidenceSignals` item with kind `web_search` when search materially changes the estimate.
 - Include source links for facts learned from search.
 - Clearly separate sourced facts from your own inference.
 - Keep quotes short; summarize instead of reproducing long copyrighted text.

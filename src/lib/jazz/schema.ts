@@ -54,6 +54,7 @@ export const MealEntry = co.map({
   usedToolsSummary: z.string().optional(),
   identifiedFoodsSummary: z.string().optional(),
   evidenceSummary: z.string().optional(),
+  confidenceSignalsSummary: z.string().optional(),
   sourceUrls: z.string().optional(),
   needsUserReview: z.boolean().optional(),
 });
