@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useSyncExternalStore,
   useState,
   type ChangeEvent,
   type ClipboardEvent,
@@ -16,6 +17,7 @@ import {
   Cloud,
   Flame,
   ImagePlus,
+  LockKeyhole,
   LogOut,
   Mail,
   MessageSquareText,
@@ -33,8 +35,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Image as JazzImage,
   useAccount,
-  useDemoAuth,
-  useLogOut,
   useSyncConnectionStatus,
 } from "jazz-tools/react";
 
@@ -44,6 +44,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { authClient } from "@/lib/auth/client";
 import { MealEntry, NutritionAccount } from "@/lib/jazz/schema";
 import {
   mealAnalysisToolLabels,
@@ -65,6 +66,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type MealSource = "text" | "photo" | "text-photo";
+type AuthMode = "sign-in" | "sign-up";
 
 type Goal = {
   id: GoalId;
@@ -98,6 +100,17 @@ type MealDraft = {
   evidenceSummary?: string;
   sourceUrls?: string;
   needsUserReview?: boolean;
+};
+
+type BetterAuthSessionState = {
+  data?: {
+    user?: {
+      id: string;
+      name?: string | null;
+      email?: string | null;
+    } | null;
+  } | null;
+  isPending: boolean;
 };
 
 type ReviewNumberField =
@@ -621,8 +634,46 @@ function isValidAuthEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function isValidAuthPassword(value: string) {
+  return value.length >= 8;
+}
+
+function defaultNameFromEmail(email: string) {
+  return email.split("@")[0] || email;
+}
+
+function readableAuthError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes("Invalid email or password")) {
+    return "Неверный email или пароль.";
+  }
+
+  if (message.includes("User already exists")) {
+    return "Аккаунт с таким email уже существует.";
+  }
+
+  if (message.includes("Jazz credentials not found")) {
+    return "Jazz еще не подготовил ключи аккаунта. Обновите страницу и попробуйте снова.";
+  }
+
+  return message;
+}
+
 function shortAccountId(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function getBetterAuthSession() {
+  return authClient.useSession.get() as unknown as BetterAuthSessionState;
+}
+
+function useBetterAuthSession() {
+  return useSyncExternalStore(
+    (callback) => authClient.useSession.subscribe(callback),
+    getBetterAuthSession,
+    getBetterAuthSession,
+  );
 }
 
 function splitStoredLines(value: string | undefined) {
@@ -796,11 +847,13 @@ export function NutritionDiary() {
       },
     },
   });
-  const auth = useDemoAuth();
-  const logOut = useLogOut();
+  const authSession = useBetterAuthSession();
   const syncConnected = useSyncConnectionStatus();
 
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authName, setAuthName] = useState("");
   const [authError, setAuthError] = useState("");
   const [isAuthBusy, setIsAuthBusy] = useState(false);
   const [mealText, setMealText] = useState("");
@@ -819,6 +872,7 @@ export function NutritionDiary() {
   }
 
   const journal = account.root.journal;
+  const accountProfile = account.profile;
   const userProfile = account.root.userProfile;
 
   if (!userProfile?.$isLoaded) {
@@ -854,10 +908,12 @@ export function NutritionDiary() {
     goalId: goal.id,
   });
   const normalizedAuthEmail = normalizeAuthEmail(authEmail);
-  const hasKnownAuthEmail = auth.existingUsers.includes(normalizedAuthEmail);
-  const isSignedIn = auth.state === "signedIn";
-  const authActionLabel = hasKnownAuthEmail ? "Войти" : "Создать";
-  const accountName = account.profile.name;
+  const normalizedAuthName = authName.trim();
+  const authUser = authSession.data?.user;
+  const isSignedIn = Boolean(authUser);
+  const authActionLabel = authMode === "sign-in" ? "Войти" : "Создать";
+  const accountName = authUser?.name ?? accountProfile.name;
+  const accountEmail = authUser?.email;
   const accountId = account.$jazz.id;
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
@@ -869,29 +925,60 @@ export function NutritionDiary() {
       return;
     }
 
+    if (!isValidAuthPassword(authPassword)) {
+      setAuthError("Пароль должен быть не короче 8 символов.");
+      setStatus("Аккаунт не открыт: пароль слишком короткий.");
+      return;
+    }
+
+    const nextName =
+      authMode === "sign-up"
+        ? normalizedAuthName || defaultNameFromEmail(normalizedAuthEmail)
+        : defaultNameFromEmail(normalizedAuthEmail);
+
     setIsAuthBusy(true);
     setAuthError("");
     setStatus(
-      hasKnownAuthEmail
-        ? "Открываем Jazz-аккаунт."
-        : "Создаем Jazz-аккаунт.",
+      authMode === "sign-in"
+        ? "Проверяем email и пароль."
+        : "Создаем серверный аккаунт.",
     );
 
     try {
-      if (hasKnownAuthEmail) {
-        await auth.logIn(normalizedAuthEmail);
+      if (authMode === "sign-in") {
+        const response = await authClient.signIn.email({
+          email: normalizedAuthEmail,
+          password: authPassword,
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message);
+        }
+
         setStatus(`Открыт аккаунт ${normalizedAuthEmail}.`);
       } else {
-        await auth.signUp(normalizedAuthEmail);
-        setStatus(`Создан аккаунт ${normalizedAuthEmail}.`);
+        accountProfile.$jazz.set("name", nextName);
+
+        const response = await authClient.signUp.email({
+          email: normalizedAuthEmail,
+          name: nextName,
+          password: authPassword,
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message);
+        }
+
+        setStatus(`Создан серверный аккаунт ${normalizedAuthEmail}.`);
       }
 
       setAuthEmail("");
+      setAuthPassword("");
+      setAuthName("");
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Jazz-авторизация не прошла.";
+      const message = readableAuthError(error);
       setAuthError(message);
-      setStatus("Jazz-авторизация не прошла.");
+      setStatus("Авторизация не прошла.");
     } finally {
       setIsAuthBusy(false);
     }
@@ -903,12 +990,15 @@ export function NutritionDiary() {
     setStatus("Выходим из Jazz-аккаунта.");
 
     try {
-      await Promise.resolve(logOut());
+      const response = await authClient.signOut();
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
       setStatus("Вы вышли. Сейчас открыт анонимный дневник.");
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Не удалось выйти из аккаунта.";
-      setAuthError(message);
+      setAuthError(readableAuthError(error));
       setStatus("Не удалось выйти из аккаунта.");
     } finally {
       setIsAuthBusy(false);
@@ -1189,7 +1279,7 @@ export function NutritionDiary() {
               </p>
               <p className="text-sm text-[#617069]">
                 {formatJournalDate(journal.dateIso)} ·{" "}
-                {isSignedIn ? "аккаунт синхронизируется" : "анонимный дневник"}
+                {isSignedIn ? "серверный аккаунт" : "анонимный дневник"}
               </p>
             </div>
           </div>
@@ -1222,7 +1312,7 @@ export function NutritionDiary() {
             {isSignedIn ? (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                 <p className="min-w-0 text-sm leading-5 text-[#617069]">
-                  Аккаунт {shortAccountId(accountId)}
+                  {accountEmail ?? "Аккаунт"} · {shortAccountId(accountId)}
                 </p>
                 <Button
                   type="button"
@@ -1236,51 +1326,128 @@ export function NutritionDiary() {
                 </Button>
               </div>
             ) : (
-              <form
-                onSubmit={handleAuthSubmit}
-                className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_auto]"
-              >
-                <Label className="sr-only" htmlFor="auth-email">
-                  Email
-                </Label>
-                <div className="relative">
-                  <Mail
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
-                    aria-hidden="true"
-                  />
-                  <Input
-                    id="auth-email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={authEmail}
-                    onChange={(event) => {
-                      setAuthEmail(event.currentTarget.value);
-                      setAuthError("");
-                    }}
-                    placeholder="email"
-                    className="h-10 min-w-0 bg-white pl-9"
-                  />
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { id: "sign-in" as const, label: "Вход" },
+                    { id: "sign-up" as const, label: "Регистрация" },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={authMode === item.id}
+                      onClick={() => {
+                        setAuthMode(item.id);
+                        setAuthError("");
+                      }}
+                      className={cn(
+                        "h-9 rounded-lg border text-sm font-medium transition-colors",
+                        authMode === item.id
+                          ? "border-[#225b43] bg-[#e7f1eb] text-[#225b43]"
+                          : "border-[#d7dfd9] bg-white hover:bg-[#f3f7f4]",
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
-                <Button
-                  type="submit"
-                  className="h-10 gap-2 px-4"
-                  disabled={isAuthBusy}
-                >
-                  {isAuthBusy ? "Открываем" : authActionLabel}
-                  <ArrowRight className="size-4" aria-hidden="true" />
-                </Button>
-              </form>
+
+                <form onSubmit={handleAuthSubmit} className="grid gap-2">
+                  {authMode === "sign-up" ? (
+                    <>
+                      <Label className="sr-only" htmlFor="auth-name">
+                        Имя
+                      </Label>
+                      <div className="relative">
+                        <UserRound
+                          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
+                          aria-hidden="true"
+                        />
+                        <Input
+                          id="auth-name"
+                          name="name"
+                          type="text"
+                          autoComplete="name"
+                          value={authName}
+                          onChange={(event) => {
+                            setAuthName(event.currentTarget.value);
+                            setAuthError("");
+                          }}
+                          placeholder="имя"
+                          className="h-10 min-w-0 bg-white pl-9"
+                        />
+                      </div>
+                    </>
+                  ) : null}
+
+                  <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_minmax(150px,0.8fr)_auto]">
+                    <Label className="sr-only" htmlFor="auth-email">
+                      Email
+                    </Label>
+                    <div className="relative">
+                      <Mail
+                        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
+                        aria-hidden="true"
+                      />
+                      <Input
+                        id="auth-email"
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        value={authEmail}
+                        onChange={(event) => {
+                          setAuthEmail(event.currentTarget.value);
+                          setAuthError("");
+                        }}
+                        placeholder="email"
+                        className="h-10 min-w-0 bg-white pl-9"
+                      />
+                    </div>
+
+                    <Label className="sr-only" htmlFor="auth-password">
+                      Пароль
+                    </Label>
+                    <div className="relative">
+                      <LockKeyhole
+                        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
+                        aria-hidden="true"
+                      />
+                      <Input
+                        id="auth-password"
+                        name="password"
+                        type="password"
+                        autoComplete={
+                          authMode === "sign-in"
+                            ? "current-password"
+                            : "new-password"
+                        }
+                        required
+                        value={authPassword}
+                        onChange={(event) => {
+                          setAuthPassword(event.currentTarget.value);
+                          setAuthError("");
+                        }}
+                        placeholder="пароль"
+                        className="h-10 min-w-0 bg-white pl-9"
+                      />
+                    </div>
+
+                    <Button
+                      type="submit"
+                      className="h-10 gap-2 px-4"
+                      disabled={isAuthBusy || authSession.isPending}
+                    >
+                      {isAuthBusy ? "Проверяем" : authActionLabel}
+                      <ArrowRight className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </form>
+              </div>
             )}
 
             {authError ? (
               <p className="text-sm leading-5 text-[#a6544b]">{authError}</p>
-            ) : null}
-            {!isSignedIn && auth.existingUsers.length > 0 ? (
-              <p className="text-sm leading-5 text-[#617069]">
-                На этом устройстве: {auth.existingUsers.join(", ")}
-              </p>
             ) : null}
           </div>
         </header>

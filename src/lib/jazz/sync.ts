@@ -2,11 +2,9 @@ import { NutritionAccount } from "@/lib/jazz/schema";
 
 type JazzSyncPeer = `ws://${string}` | `wss://${string}`;
 
-const defaultJazzSyncPeer: JazzSyncPeer = "ws://127.0.0.1:4200";
-
 export const jazzSyncConfig = {
   AccountSchema: NutritionAccount,
-  authSecretStorageKey: "prilozyxa-calories-local-jazz",
+  authSecretStorageKey: "prilozyxa-calories-better-auth-jazz",
   defaultProfileName: "Пользователь",
   guestMode: false,
   storage: "indexedDB",
@@ -17,7 +15,11 @@ export const jazzSyncConfig = {
 } as const;
 
 function readJazzSyncPeer(): JazzSyncPeer {
-  const peer = process.env.NEXT_PUBLIC_JAZZ_SYNC_PEER ?? defaultJazzSyncPeer;
+  const peer = process.env.NEXT_PUBLIC_JAZZ_SYNC_PEER?.trim();
+
+  if (!peer) {
+    throw new Error("NEXT_PUBLIC_JAZZ_SYNC_PEER обязателен для Jazz sync.");
+  }
 
   if (peer.startsWith("ws://") || peer.startsWith("wss://")) {
     return peer as JazzSyncPeer;

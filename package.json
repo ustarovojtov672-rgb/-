@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "jazz:sync": "jazz-run sync --host 127.0.0.1 --port 4200 --db ./.jazz-sync/storage.db",
+    "auth:setup": "node scripts/create-auth-worker.mjs",
     "build:web": "next build",
     "build:mobile": "set NEXT_OUTPUT=export&& next build",
     "cap:sync": "npm run build:mobile && cap sync",
@@ -24,8 +25,11 @@
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@capacitor/core": "^8.4.0",
+    "better-auth": "^1.6.19",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cojson": "^0.20.18",
+    "cojson-transport-ws": "^0.20.18",
     "jazz-tools": "^0.20.18",
     "just-bash": "^3.0.1",
     "lucide-react": "^1.18.0",
@@ -51,6 +55,7 @@
     "jazz-run": "^0.20.18",
     "serve": "^14.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "ws": "^8.21.0"
   }
 }
