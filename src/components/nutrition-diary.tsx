@@ -13,9 +13,10 @@ import {
   Beef,
   Camera,
   CheckCircle2,
+  Cloud,
   Flame,
   ImagePlus,
-  LockKeyhole,
+  LogOut,
   Mail,
   MessageSquareText,
   Plus,
@@ -29,7 +30,13 @@ import {
   Wheat,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Image as JazzImage, useAccount } from "jazz-tools/react";
+import {
+  Image as JazzImage,
+  useAccount,
+  useDemoAuth,
+  useLogOut,
+  useSyncConnectionStatus,
+} from "jazz-tools/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -235,7 +242,7 @@ const biologicalSexOptions: BiologicalSex[] = ["female", "male"];
 const activityOptions: ActivityLevel[] = ["low", "medium", "high"];
 const mealAnalysisEndpoint =
   process.env.NEXT_PUBLIC_MEAL_ANALYSIS_ENDPOINT ?? "/api/analyze-meal";
-const localSaveTimeoutMs = 10000;
+const syncSaveTimeoutMs = 10000;
 const reviewNumberFields: Array<{
   field: ReviewNumberField;
   label: string;
@@ -606,6 +613,18 @@ function formatJournalDate(dateIso: string) {
   });
 }
 
+function normalizeAuthEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isValidAuthEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function shortAccountId(value: string) {
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
 function splitStoredLines(value: string | undefined) {
   return (
     value
@@ -751,7 +770,7 @@ function LoadingDiary() {
           <div>
             <p className="font-semibold">Загружаем дневник</p>
             <p className="text-sm text-[#617069]">
-              Проверяем локальное Jazz-хранилище.
+              Проверяем Jazz-хранилище и sync-сервер.
             </p>
           </div>
         </div>
@@ -763,6 +782,7 @@ function LoadingDiary() {
 export function NutritionDiary() {
   const account = useAccount(NutritionAccount, {
     resolve: {
+      profile: true,
       root: {
         userProfile: true,
         journal: {
@@ -776,7 +796,13 @@ export function NutritionDiary() {
       },
     },
   });
+  const auth = useDemoAuth();
+  const logOut = useLogOut();
+  const syncConnected = useSyncConnectionStatus();
 
+  const [authEmail, setAuthEmail] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isAuthBusy, setIsAuthBusy] = useState(false);
   const [mealText, setMealText] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoName, setPhotoName] = useState("");
@@ -786,7 +812,7 @@ export function NutritionDiary() {
   const [isMealBusy, setIsMealBusy] = useState(false);
   const [isPhotoDragActive, setIsPhotoDragActive] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
-  const [status, setStatus] = useState("Дневник сохранен локально через Jazz.");
+  const [status, setStatus] = useState("Дневник синхронизируется через Jazz.");
 
   if (!account.$isLoaded) {
     return <LoadingDiary />;
@@ -827,6 +853,67 @@ export function NutritionDiary() {
     caloriesLeft,
     goalId: goal.id,
   });
+  const normalizedAuthEmail = normalizeAuthEmail(authEmail);
+  const hasKnownAuthEmail = auth.existingUsers.includes(normalizedAuthEmail);
+  const isSignedIn = auth.state === "signedIn";
+  const authActionLabel = hasKnownAuthEmail ? "Войти" : "Создать";
+  const accountName = account.profile.name;
+  const accountId = account.$jazz.id;
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!isValidAuthEmail(normalizedAuthEmail)) {
+      setAuthError("Введите корректный email.");
+      setStatus("Аккаунт не открыт: email выглядит неверно.");
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthError("");
+    setStatus(
+      hasKnownAuthEmail
+        ? "Открываем Jazz-аккаунт."
+        : "Создаем Jazz-аккаунт.",
+    );
+
+    try {
+      if (hasKnownAuthEmail) {
+        await auth.logIn(normalizedAuthEmail);
+        setStatus(`Открыт аккаунт ${normalizedAuthEmail}.`);
+      } else {
+        await auth.signUp(normalizedAuthEmail);
+        setStatus(`Создан аккаунт ${normalizedAuthEmail}.`);
+      }
+
+      setAuthEmail("");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Jazz-авторизация не прошла.";
+      setAuthError(message);
+      setStatus("Jazz-авторизация не прошла.");
+    } finally {
+      setIsAuthBusy(false);
+    }
+  }
+
+  async function handleLogOut() {
+    setIsAuthBusy(true);
+    setAuthError("");
+    setStatus("Выходим из Jazz-аккаунта.");
+
+    try {
+      await Promise.resolve(logOut());
+      setStatus("Вы вышли. Сейчас открыт анонимный дневник.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Не удалось выйти из аккаунта.";
+      setAuthError(message);
+      setStatus("Не удалось выйти из аккаунта.");
+    } finally {
+      setIsAuthBusy(false);
+    }
+  }
 
   function setMealPhoto(file: File) {
     if (photoPreview) {
@@ -911,7 +998,7 @@ export function NutritionDiary() {
       ...targetDiff(targets),
     });
 
-    setStatus(`Цель сохранена: ${nextGoal.label}.`);
+    setStatus(`Цель сохранена и синхронизируется: ${nextGoal.label}.`);
   }
 
   function updateProfile(patch: Partial<NutritionProfileData>) {
@@ -926,7 +1013,7 @@ export function NutritionDiary() {
       mode: selectedGoal,
       ...targetDiff(targets),
     });
-    setStatus("Профиль сохранен, цели пересчитаны.");
+    setStatus("Профиль сохранен, цели пересчитаны и синхронизируются.");
   }
 
   function updateProfileNumber(
@@ -1045,16 +1132,16 @@ export function NutritionDiary() {
           const stream = streamRef?.value;
 
           if (stream?.$isLoaded) {
-            await stream.$jazz.waitForSync({ timeout: localSaveTimeoutMs });
+            await stream.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
           }
         }
 
-        await meal.photo.$jazz.waitForSync({ timeout: localSaveTimeoutMs });
+        await meal.photo.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
       }
 
-      await meal.$jazz.waitForSync({ timeout: localSaveTimeoutMs });
-      await journal.meals.$jazz.waitForSync({ timeout: localSaveTimeoutMs });
-      await journal.$jazz.waitForSync({ timeout: localSaveTimeoutMs });
+      await meal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
+      await journal.meals.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
+      await journal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
 
       clearMealComposer();
       setReviewDraft(null);
@@ -1065,7 +1152,7 @@ export function NutritionDiary() {
       );
     } catch (error) {
       setStatus(
-        "Не удалось полностью сохранить запись в локальное Jazz-хранилище.",
+        "Не удалось полностью сохранить запись в Jazz.",
       );
       throw error;
     } finally {
@@ -1085,7 +1172,7 @@ export function NutritionDiary() {
     }
 
     journal.meals.$jazz.splice(index, 1);
-    setStatus("Прием пищи удален из локального дневника.");
+    setStatus("Прием пищи удален из Jazz-дневника.");
   }
 
   return (
@@ -1101,57 +1188,101 @@ export function NutritionDiary() {
                 Prilozyxa Calories
               </p>
               <p className="text-sm text-[#617069]">
-                {formatJournalDate(journal.dateIso)} · сохранено локально
+                {formatJournalDate(journal.dateIso)} ·{" "}
+                {isSignedIn ? "аккаунт синхронизируется" : "анонимный дневник"}
               </p>
             </div>
           </div>
 
-          <form
-            action="/auth/start"
-            method="post"
-            className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-          >
-            <Label className="sr-only" htmlFor="auth-email">
-              Email
-            </Label>
-            <div className="relative">
-              <Mail
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
-                aria-hidden="true"
-              />
-              <Input
-                id="auth-email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                placeholder="email"
-                className="h-10 min-w-0 bg-white pl-9"
-              />
+          <div className="w-full max-w-xl space-y-2 lg:w-auto">
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "h-8 rounded-lg px-3",
+                  syncConnected
+                    ? "border-[#225b43] bg-[#e7f1eb] text-[#225b43]"
+                    : "border-[#a6544b] bg-[#fff4f1] text-[#704037]",
+                )}
+              >
+                <Cloud className="mr-1 size-3.5" aria-hidden="true" />
+                {syncConnected ? "sync-сервер онлайн" : "sync-сервер офлайн"}
+              </Badge>
+              {isSignedIn ? (
+                <Badge
+                  variant="outline"
+                  className="h-8 rounded-lg border-[#cfd9d3] bg-white px-3 text-[#53625b]"
+                >
+                  <UserRound className="mr-1 size-3.5" aria-hidden="true" />
+                  {accountName}
+                </Badge>
+              ) : null}
             </div>
-            <Label className="sr-only" htmlFor="auth-password">
-              Пароль
-            </Label>
-            <div className="relative">
-              <LockKeyhole
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
-                aria-hidden="true"
-              />
-              <Input
-                id="auth-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                placeholder="пароль"
-                className="h-10 min-w-0 bg-white pl-9"
-              />
-            </div>
-            <Button type="submit" className="h-10 gap-2 px-4">
-              Войти
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Button>
-          </form>
+
+            {isSignedIn ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                <p className="min-w-0 text-sm leading-5 text-[#617069]">
+                  Аккаунт {shortAccountId(accountId)}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 gap-2 px-4"
+                  disabled={isAuthBusy}
+                  onClick={handleLogOut}
+                >
+                  Выйти
+                  <LogOut className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            ) : (
+              <form
+                onSubmit={handleAuthSubmit}
+                className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_auto]"
+              >
+                <Label className="sr-only" htmlFor="auth-email">
+                  Email
+                </Label>
+                <div className="relative">
+                  <Mail
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#687770]"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    id="auth-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={authEmail}
+                    onChange={(event) => {
+                      setAuthEmail(event.currentTarget.value);
+                      setAuthError("");
+                    }}
+                    placeholder="email"
+                    className="h-10 min-w-0 bg-white pl-9"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="h-10 gap-2 px-4"
+                  disabled={isAuthBusy}
+                >
+                  {isAuthBusy ? "Открываем" : authActionLabel}
+                  <ArrowRight className="size-4" aria-hidden="true" />
+                </Button>
+              </form>
+            )}
+
+            {authError ? (
+              <p className="text-sm leading-5 text-[#a6544b]">{authError}</p>
+            ) : null}
+            {!isSignedIn && auth.existingUsers.length > 0 ? (
+              <p className="text-sm leading-5 text-[#617069]">
+                На этом устройстве: {auth.existingUsers.join(", ")}
+              </p>
+            ) : null}
+          </div>
         </header>
 
         <div className="grid flex-1 gap-4 py-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)_minmax(320px,0.8fr)]">
