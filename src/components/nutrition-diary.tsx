@@ -48,7 +48,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth/client";
 import { MealEntry, MealMemoryEntry, NutritionAccount } from "@/lib/jazz/schema";
@@ -76,6 +81,7 @@ import { cn } from "@/lib/utils";
 
 type MealSource = "text" | "photo" | "text-photo";
 type AuthMode = "sign-in" | "sign-up";
+type AppTab = "add" | "diary";
 type AnalysisPhase =
   | "idle"
   | "checking"
@@ -1335,6 +1341,8 @@ export function NutritionDiary() {
   const [agentStatusError, setAgentStatusError] = useState("");
   const [isAgentStatusBusy, setIsAgentStatusBusy] = useState(false);
   const [status, setStatus] = useState("Дневник синхронизируется через Jazz.");
+  const [activeTab, setActiveTab] = useState<AppTab>("add");
+  const [expandedMealId, setExpandedMealId] = useState<string | null>(null);
 
   const refreshAgentStatus = useCallback(async () => {
     setIsAgentStatusBusy(true);
@@ -1898,6 +1906,8 @@ export function NutritionDiary() {
       clearMealComposer();
       setReviewDraft(null);
       setAnalysisPhase("idle");
+      setExpandedMealId(meal.$jazz.id);
+      setActiveTab("diary");
       setStatus(
         meal.photo
           ? `Сохранено с AI-анализом, фото и памятью: ${meal.title}.`
@@ -1929,6 +1939,7 @@ export function NutritionDiary() {
     }
 
     journal.meals.$jazz.splice(index, 1);
+    setExpandedMealId((current) => (current === id ? null : current));
     setStatus("Прием пищи удален из Jazz-дневника.");
   }
 
@@ -2119,7 +2130,22 @@ export function NutritionDiary() {
           </div>
         </header>
 
-        <div className="grid flex-1 gap-4 py-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)_minmax(320px,0.8fr)]">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as AppTab)}
+          className="flex flex-1 flex-col py-4"
+        >
+          <TabsList className="w-full justify-start rounded-lg border border-[#d7dfd9] bg-white p-1 sm:w-fit">
+            <TabsTrigger value="add" className="h-9 px-4">
+              Добавить
+            </TabsTrigger>
+            <TabsTrigger value="diary" className="h-9 px-4">
+              Дневник
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="add" className="mt-4">
+            <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)_minmax(320px,0.8fr)]">
           <aside className="space-y-4">
             <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
               <div className="flex items-start gap-3">
@@ -2657,126 +2683,6 @@ export function NutritionDiary() {
               </div>
             ) : null}
 
-            <Separator className="my-5 bg-[#dfe7e2]" />
-
-            <div className="space-y-3">
-              {meals.map((meal) => {
-                const photoId = meal.$jazz.refs.photo?.id;
-
-                return (
-                  <article
-                    key={meal.$jazz.id}
-                    className="grid gap-3 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
-                  >
-                    <MealIcon title={meal.title} />
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="break-words text-base font-semibold leading-6">
-                          {meal.title}
-                        </h3>
-                        <Badge
-                          variant="outline"
-                          className="rounded-lg border-[#cfd9d3] bg-white text-[#53625b]"
-                        >
-                          {sourceLabels[meal.source]}
-                        </Badge>
-                        {meal.confidencePercent !== undefined ? (
-                          <Badge
-                            variant="outline"
-                            className="rounded-lg border-[#cfd9d3] bg-white text-[#53625b]"
-                          >
-                            AI {meal.confidencePercent}%
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 text-sm leading-6 text-[#617069]">
-                        {meal.detail}
-                      </p>
-                      {meal.recommendation ? (
-                        <p className="mt-2 rounded-lg bg-[#f7eee9] px-3 py-2 text-sm leading-5 text-[#704037]">
-                          {meal.recommendation}
-                        </p>
-                      ) : null}
-                      {meal.agentSummary ? (
-                        <p className="mt-2 rounded-lg bg-[#eef2f8] px-3 py-2 text-sm leading-5 text-[#263f78]">
-                          Агент: {meal.agentSummary}
-                        </p>
-                      ) : null}
-                      {meal.needsUserReview ? (
-                        <p className="mt-2 rounded-lg bg-[#fff8f4] px-3 py-2 text-sm leading-5 text-[#704037]">
-                          Нужна проверка порции.
-                        </p>
-                      ) : null}
-                      {meal.portionAssumption ? (
-                        <p className="mt-1 text-sm leading-5 text-[#617069]">
-                          Порция: {meal.portionAssumption}
-                        </p>
-                      ) : null}
-                      {meal.confidenceSignalsSummary ? (
-                        <div className="mt-2">
-                          <ConfidenceSignals
-                            value={meal.confidenceSignalsSummary}
-                          />
-                        </div>
-                      ) : null}
-                      {meal.usedToolsSummary ? (
-                        <div className="mt-2">
-                          <SummaryChips
-                            value={meal.usedToolsSummary}
-                            tone="agent"
-                          />
-                        </div>
-                      ) : null}
-                      {meal.identifiedFoodsSummary ? (
-                        <div className="mt-2">
-                          <SummaryChips value={meal.identifiedFoodsSummary} />
-                        </div>
-                      ) : null}
-                      {meal.sourceUrls ? (
-                        <div className="mt-2">
-                          <SourceLinks value={meal.sourceUrls} />
-                        </div>
-                      ) : null}
-                      {meal.photoName ? (
-                        <p className="mt-1 text-sm leading-5 text-[#617069]">
-                          Фото: {meal.photoName}
-                        </p>
-                      ) : null}
-                      {photoId ? (
-                        <MealPhoto imageId={photoId} title={meal.title} />
-                      ) : null}
-                      <div className="mt-3 flex flex-wrap gap-2 text-sm text-[#53625b]">
-                        <span className="inline-flex items-center gap-1 rounded-lg bg-[#edf3ef] px-2 py-1">
-                          <Flame className="size-3.5" aria-hidden="true" />
-                          {meal.caloriesKcal} ккал
-                        </span>
-                        <span className="rounded-lg bg-[#eef2f8] px-2 py-1">
-                          Белок {meal.proteinGrams} г
-                        </span>
-                        <span className="rounded-lg bg-[#f6eee3] px-2 py-1">
-                          Клетчатка {meal.fiberGrams} г
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-start justify-between gap-2 sm:block sm:text-right">
-                      <p className="text-sm text-[#617069]">
-                        {formatMealTime(meal.eatenAtIso)}
-                      </p>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Удалить ${meal.title}`}
-                        onClick={() => removeMeal(meal.$jazz.id)}
-                        className="mt-0 text-[#7d4b45] hover:bg-[#f7e8e5] sm:mt-2"
-                      >
-                        <Trash2 className="size-4" aria-hidden="true" />
-                      </Button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
           </section>
 
           <aside className="space-y-4">
@@ -3029,6 +2935,207 @@ export function NutritionDiary() {
             </section>
           </aside>
         </div>
+          </TabsContent>
+
+          <TabsContent value="diary" className="mt-4">
+            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-[#dfe7e2] pb-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-2xl font-semibold leading-8">Дневник</h2>
+                  <p className="mt-1 text-sm text-[#617069]">
+                    {formatJournalDate(journal.dateIso)}
+                  </p>
+                </div>
+                <Badge className="h-7 rounded-lg bg-[#e9edf7] px-3 text-[#263f78] hover:bg-[#e9edf7]">
+                  {meals.length} записи
+                </Badge>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                  <p className="text-sm text-[#617069]">Калории</p>
+                  <p className="mt-1 text-xl font-semibold">
+                    {formatNumber(totals.calories)} ккал
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                  <p className="text-sm text-[#617069]">Белок</p>
+                  <p className="mt-1 text-xl font-semibold">
+                    {formatNumber(totals.protein)} г
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                  <p className="text-sm text-[#617069]">Клетчатка</p>
+                  <p className="mt-1 text-xl font-semibold">
+                    {formatNumber(totals.fiber)} г
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                  <p className="text-sm text-[#617069]">Баланс дня</p>
+                  <p className="mt-1 text-xl font-semibold">{score}%</p>
+                </div>
+              </div>
+
+              {meals.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {meals.map((meal) => {
+                    const photoId = meal.$jazz.refs.photo?.id;
+                    const isExpanded = expandedMealId === meal.$jazz.id;
+
+                    return (
+                      <article
+                        key={meal.$jazz.id}
+                        className={cn(
+                          "rounded-lg border bg-[#fbfcfb] transition-colors",
+                          isExpanded
+                            ? "border-[#225b43]"
+                            : "border-[#dfe7e2]",
+                        )}
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() =>
+                            setExpandedMealId((current) =>
+                              current === meal.$jazz.id ? null : meal.$jazz.id,
+                            )
+                          }
+                          className="block w-full p-3 text-left"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <MealIcon title={meal.title} />
+                              <div className="min-w-0">
+                                <h3 className="line-clamp-2 break-words text-base font-semibold leading-6">
+                                  {meal.title}
+                                </h3>
+                                <p className="mt-1 text-sm text-[#617069]">
+                                  {formatMealTime(meal.eatenAtIso)}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 rounded-lg border-[#cfd9d3] bg-white text-[#53625b]"
+                            >
+                              {sourceLabels[meal.source]}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                            <span className="rounded-lg bg-[#edf3ef] px-2 py-1 text-[#53625b]">
+                              {meal.caloriesKcal} ккал
+                            </span>
+                            <span className="rounded-lg bg-[#eef2f8] px-2 py-1 text-[#53625b]">
+                              Б {meal.proteinGrams} г
+                            </span>
+                            <span className="rounded-lg bg-[#f6eee3] px-2 py-1 text-[#53625b]">
+                              Кл {meal.fiberGrams} г
+                            </span>
+                          </div>
+                        </button>
+
+                        {isExpanded ? (
+                          <div className="border-t border-[#dfe7e2] p-3">
+                            <p className="text-sm leading-6 text-[#617069]">
+                              {meal.detail}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {meal.confidencePercent !== undefined ? (
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-lg border-[#cfd9d3] bg-white text-[#53625b]"
+                                >
+                                  AI {meal.confidencePercent}%
+                                </Badge>
+                              ) : null}
+                              {meal.needsUserReview ? (
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-lg border-[#d7b9aa] bg-[#fff8f4] text-[#704037]"
+                                >
+                                  Проверить порцию
+                                </Badge>
+                              ) : null}
+                            </div>
+                            {meal.recommendation ? (
+                              <p className="mt-3 rounded-lg bg-[#f7eee9] px-3 py-2 text-sm leading-5 text-[#704037]">
+                                {meal.recommendation}
+                              </p>
+                            ) : null}
+                            {meal.agentSummary ? (
+                              <p className="mt-2 rounded-lg bg-[#eef2f8] px-3 py-2 text-sm leading-5 text-[#263f78]">
+                                Агент: {meal.agentSummary}
+                              </p>
+                            ) : null}
+                            {meal.portionAssumption ? (
+                              <p className="mt-2 text-sm leading-5 text-[#617069]">
+                                Порция: {meal.portionAssumption}
+                              </p>
+                            ) : null}
+                            {meal.confidenceSignalsSummary ? (
+                              <div className="mt-3">
+                                <ConfidenceSignals
+                                  value={meal.confidenceSignalsSummary}
+                                />
+                              </div>
+                            ) : null}
+                            {meal.usedToolsSummary ? (
+                              <div className="mt-3">
+                                <SummaryChips
+                                  value={meal.usedToolsSummary}
+                                  tone="agent"
+                                />
+                              </div>
+                            ) : null}
+                            {meal.identifiedFoodsSummary ? (
+                              <div className="mt-3">
+                                <SummaryChips
+                                  value={meal.identifiedFoodsSummary}
+                                />
+                              </div>
+                            ) : null}
+                            {meal.sourceUrls ? (
+                              <div className="mt-3">
+                                <SourceLinks value={meal.sourceUrls} />
+                              </div>
+                            ) : null}
+                            {meal.photoName ? (
+                              <p className="mt-2 text-sm leading-5 text-[#617069]">
+                                Фото: {meal.photoName}
+                              </p>
+                            ) : null}
+                            {photoId ? (
+                              <MealPhoto imageId={photoId} title={meal.title} />
+                            ) : null}
+                            <div className="mt-3 flex justify-end">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Удалить ${meal.title}`}
+                                onClick={() => removeMeal(meal.$jazz.id)}
+                                className="text-[#7d4b45] hover:bg-[#f7e8e5]"
+                              >
+                                <Trash2
+                                  className="size-4"
+                                  aria-hidden="true"
+                                />
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-4 text-sm leading-6 text-[#617069]">
+                  Записей за день пока нет.
+                </div>
+              )}
+            </section>
+          </TabsContent>
+        </Tabs>
       </div>
     </main>
   );
