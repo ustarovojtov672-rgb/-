@@ -48,6 +48,7 @@ export async function analyzeMealWithPiNutritionAgent({
   profile,
   goal,
   targets,
+  mealMemory,
   previousMeals,
 }: NutritionAgentInput): Promise<MealAnalysisResult> {
   const projectDir = process.cwd();
@@ -94,6 +95,7 @@ export async function analyzeMealWithPiNutritionAgent({
   const toolPlan = buildNutritionAgentToolPlan({
     description,
     hasPhoto: photoFile !== null,
+    mealMemory,
     previousMeals,
   });
   const prompt = buildPiPrompt(
@@ -102,6 +104,7 @@ export async function analyzeMealWithPiNutritionAgent({
       profile,
       goal,
       targets,
+      mealMemory,
       previousMeals,
       toolPlan,
       hasPhoto: photoFile !== null,

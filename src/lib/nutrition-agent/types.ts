@@ -2,7 +2,10 @@ import type {
   NutritionProfileData,
   NutritionTargets,
 } from "@/lib/nutrition/targets";
-import type { PreviousMealSnapshot } from "@/lib/nutrition-agent/memory";
+import type {
+  MealMemorySnapshot,
+  PreviousMealSnapshot,
+} from "@/lib/nutrition-agent/memory";
 import type { NutritionAgentGoal } from "@/lib/nutrition-agent/prompt";
 
 export type NutritionAgentInput = {
@@ -12,6 +15,7 @@ export type NutritionAgentInput = {
   profile: NutritionProfileData;
   goal: NutritionAgentGoal;
   targets: NutritionTargets;
+  mealMemory: MealMemorySnapshot[];
   previousMeals: PreviousMealSnapshot[];
 };
 

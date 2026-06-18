@@ -3,8 +3,12 @@ import {
   type MealAnalysisTool,
 } from "@/lib/nutrition/meal-analysis";
 import {
+  findSimilarMealMemory,
   findSimilarMeals,
+  type MealMemoryMatch,
+  type MealMemorySnapshot,
   type PreviousMealSnapshot,
+  type PreviousMealMatch,
 } from "@/lib/nutrition-agent/memory";
 import { searchLocalFoodDatabase } from "@/lib/nutrition-agent/product-database";
 
@@ -17,7 +21,7 @@ export type NutritionAgentToolPlanItem = {
 
 export type NutritionAgentToolPlan = {
   tools: NutritionAgentToolPlanItem[];
-  memoryMatches: ReturnType<typeof findSimilarMeals>;
+  memoryMatches: Array<MealMemoryMatch | PreviousMealMatch>;
   databaseMatches: ReturnType<typeof searchLocalFoodDatabase>;
   barcodeCandidates: string[];
   shouldSearchWeb: boolean;
@@ -26,16 +30,26 @@ export type NutritionAgentToolPlan = {
 export function buildNutritionAgentToolPlan({
   description,
   hasPhoto,
+  mealMemory,
   previousMeals,
 }: {
   description: string;
   hasPhoto: boolean;
+  mealMemory: MealMemorySnapshot[];
   previousMeals: PreviousMealSnapshot[];
 }): NutritionAgentToolPlan {
-  const memoryMatches = findSimilarMeals({
+  const confirmedMemoryMatches = findSimilarMealMemory({
+    query: description,
+    mealMemory,
+  });
+  const recentMealMatches = findSimilarMeals({
     query: description,
     previousMeals,
   });
+  const memoryMatches = mergeMemoryMatches(
+    confirmedMemoryMatches,
+    recentMealMatches,
+  );
   const databaseMatches = searchLocalFoodDatabase(description);
   const barcodeCandidates = extractBarcodeCandidates(description);
   const hasDescription = description.trim().length > 0;
@@ -109,6 +123,21 @@ export function buildNutritionAgentToolPlan({
     barcodeCandidates,
     shouldSearchWeb,
   };
+}
+
+function mergeMemoryMatches(
+  confirmedMemoryMatches: MealMemoryMatch[],
+  recentMealMatches: PreviousMealMatch[],
+) {
+  return [...confirmedMemoryMatches, ...recentMealMatches]
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.daysAgo - right.daysAgo;
+    })
+    .slice(0, 6);
 }
 
 export function summarizeToolPlanForPrompt(plan: NutritionAgentToolPlan) {

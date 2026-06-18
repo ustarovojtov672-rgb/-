@@ -22,6 +22,7 @@ import {
   Mail,
   MessageSquareText,
   Plus,
+  Database,
   Salad,
   Send,
   Sparkles,
@@ -45,12 +46,13 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth/client";
-import { MealEntry, NutritionAccount } from "@/lib/jazz/schema";
+import { MealEntry, MealMemoryEntry, NutritionAccount } from "@/lib/jazz/schema";
 import {
   mealAnalysisToolLabels,
   type MealAnalysisResponse,
   type MealAnalysisResult,
 } from "@/lib/nutrition/meal-analysis";
+import type { MealMemorySnapshot } from "@/lib/nutrition-agent/memory";
 import {
   activityLabels,
   biologicalSexLabels,
@@ -256,6 +258,7 @@ const activityOptions: ActivityLevel[] = ["low", "medium", "high"];
 const mealAnalysisEndpoint =
   process.env.NEXT_PUBLIC_MEAL_ANALYSIS_ENDPOINT ?? "/api/analyze-meal";
 const syncSaveTimeoutMs = 10000;
+const mealMemoryLimit = 50;
 const reviewNumberFields: Array<{
   field: ReviewNumberField;
   label: string;
@@ -555,12 +558,14 @@ async function analyzeMeal({
   photoFile,
   profile,
   goal,
+  mealMemory,
   previousMeals,
 }: {
   text: string;
   photoFile: File | null;
   profile: NutritionProfileData;
   goal: GoalWithTargets;
+  mealMemory: MealMemorySnapshot[];
   previousMeals: MealDraft[];
 }) {
   const formData = new FormData();
@@ -568,6 +573,7 @@ async function analyzeMeal({
   formData.set("profile", JSON.stringify(profile));
   formData.set("goal", JSON.stringify({ id: goal.id, label: goal.label }));
   formData.set("targets", JSON.stringify(goal.targets));
+  formData.set("mealMemory", JSON.stringify(mealMemory.slice(0, mealMemoryLimit)));
   formData.set(
     "previousMeals",
     JSON.stringify(
@@ -662,6 +668,114 @@ function readableAuthError(error: unknown) {
 
 function shortAccountId(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function normalizeMealMemoryTitle(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-zа-яё0-9]+/iu)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function tokenizeMealMemory(value: string) {
+  return normalizeMealMemoryTitle(value)
+    .split(" ")
+    .filter((token) => token.length >= 3);
+}
+
+function mealMemoryInputFromDraft({
+  draft,
+  lastSeenAtIso,
+  timesConfirmed,
+}: {
+  draft: MealDraft;
+  lastSeenAtIso: string;
+  timesConfirmed: number;
+}) {
+  const input: Parameters<typeof MealMemoryEntry.create>[0] = {
+    normalizedTitle: normalizeMealMemoryTitle(draft.title),
+    title: draft.title,
+    detail: draft.detail,
+    lastSeenAtIso,
+    timesConfirmed,
+    caloriesKcal: draft.caloriesKcal,
+    proteinGrams: draft.proteinGrams,
+    fatGrams: draft.fatGrams,
+    carbsGrams: draft.carbsGrams,
+    fiberGrams: draft.fiberGrams,
+    ironMilligrams: draft.ironMilligrams,
+    potassiumMilligrams: draft.potassiumMilligrams,
+  };
+
+  if (draft.portionAssumption) {
+    input.portionAssumption = draft.portionAssumption;
+  }
+
+  if (draft.identifiedFoodsSummary) {
+    input.identifiedFoodsSummary = draft.identifiedFoodsSummary;
+  }
+
+  return input;
+}
+
+function mealMemorySnapshot(entry: MealMemorySnapshot): MealMemorySnapshot {
+  return {
+    normalizedTitle: entry.normalizedTitle,
+    title: entry.title,
+    detail: entry.detail,
+    lastSeenAtIso: entry.lastSeenAtIso,
+    timesConfirmed: entry.timesConfirmed,
+    caloriesKcal: entry.caloriesKcal,
+    proteinGrams: entry.proteinGrams,
+    fatGrams: entry.fatGrams,
+    carbsGrams: entry.carbsGrams,
+    fiberGrams: entry.fiberGrams,
+    ironMilligrams: entry.ironMilligrams,
+    potassiumMilligrams: entry.potassiumMilligrams,
+    portionAssumption: entry.portionAssumption,
+    identifiedFoodsSummary: entry.identifiedFoodsSummary,
+  };
+}
+
+function findReviewMemoryMatches(
+  draft: MealDraft,
+  mealMemory: MealMemorySnapshot[],
+) {
+  const queryTokens = tokenizeMealMemory(
+    `${draft.title} ${draft.detail} ${draft.identifiedFoodsSummary ?? ""}`,
+  );
+
+  if (queryTokens.length === 0) {
+    return [];
+  }
+
+  return mealMemory
+    .map((entry) => {
+      const memoryTokens = new Set(
+        tokenizeMealMemory(
+          `${entry.title} ${entry.detail} ${entry.identifiedFoodsSummary ?? ""}`,
+        ),
+      );
+      const score = queryTokens.reduce(
+        (total, token) => total + (memoryTokens.has(token) ? 1 : 0),
+        0,
+      );
+
+      return {
+        ...entry,
+        score,
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return right.timesConfirmed - left.timesConfirmed;
+    })
+    .slice(0, 3);
 }
 
 function getBetterAuthSession() {
@@ -844,6 +958,7 @@ export function NutritionDiary() {
             },
           },
         },
+        mealMemory: { $each: true },
       },
     },
   });
@@ -874,11 +989,21 @@ export function NutritionDiary() {
   const journal = account.root.journal;
   const accountProfile = account.profile;
   const userProfile = account.root.userProfile;
+  const mealMemory = account.root.mealMemory;
 
   if (!userProfile?.$isLoaded) {
     return <LoadingDiary />;
   }
 
+  if (!mealMemory) {
+    throw new Error("Meal memory was not initialized by Jazz migration.");
+  }
+
+  if (!mealMemory.$isLoaded) {
+    return <LoadingDiary />;
+  }
+
+  const loadedMealMemory = mealMemory;
   const loadedUserProfile = userProfile;
   const nutritionProfile = profileSnapshot(loadedUserProfile);
   const selectedGoal = journal.goal.mode;
@@ -892,6 +1017,13 @@ export function NutritionDiary() {
       new Date(right.eatenAtIso).getTime() -
       new Date(left.eatenAtIso).getTime(),
   );
+  const mealMemorySnapshots = [...loadedMealMemory]
+    .map(mealMemorySnapshot)
+    .sort(
+      (left, right) =>
+        new Date(right.lastSeenAtIso).getTime() -
+        new Date(left.lastSeenAtIso).getTime(),
+    );
   const totals = sumMeals(meals);
   const latestMealRecommendation = meals.find(
     (meal) => meal.recommendation,
@@ -915,6 +1047,9 @@ export function NutritionDiary() {
   const accountName = authUser?.name ?? accountProfile.name;
   const accountEmail = authUser?.email;
   const accountId = account.$jazz.id;
+  const reviewMemoryMatches = reviewDraft
+    ? findReviewMemoryMatches(reviewDraft, mealMemorySnapshots)
+    : [];
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1157,6 +1292,7 @@ export function NutritionDiary() {
         photoFile,
         profile: nutritionProfile,
         goal,
+        mealMemory: mealMemorySnapshots,
         previousMeals: meals,
       });
 
@@ -1179,9 +1315,49 @@ export function NutritionDiary() {
     }
   }
 
+  function upsertConfirmedMealMemory(draft: MealDraft, lastSeenAtIso: string) {
+    const normalizedTitle = normalizeMealMemoryTitle(draft.title);
+
+    if (!normalizedTitle) {
+      throw new Error("Meal memory title must not be empty.");
+    }
+
+    const existingEntry = loadedMealMemory.find(
+      (entry) => entry.normalizedTitle === normalizedTitle,
+    );
+    const nextInput = mealMemoryInputFromDraft({
+      draft,
+      lastSeenAtIso,
+      timesConfirmed: (existingEntry?.timesConfirmed ?? 0) + 1,
+    });
+
+    if (existingEntry) {
+      existingEntry.$jazz.applyDiff(nextInput);
+      return existingEntry;
+    }
+
+    const entry = MealMemoryEntry.create(nextInput);
+    loadedMealMemory.$jazz.unshift(entry);
+
+    if (loadedMealMemory.length > mealMemoryLimit) {
+      loadedMealMemory.$jazz.splice(
+        mealMemoryLimit,
+        loadedMealMemory.length - mealMemoryLimit,
+      );
+    }
+
+    return entry;
+  }
+
   async function saveReviewDraft() {
     if (!reviewDraft) {
       throw new Error("Review draft is missing.");
+    }
+
+    if (!normalizeMealMemoryTitle(reviewDraft.title)) {
+      setAnalysisError("Введите название блюда перед сохранением.");
+      setStatus("Запись не сохранена: название пустое.");
+      return;
     }
 
     setIsMealBusy(true);
@@ -1189,9 +1365,10 @@ export function NutritionDiary() {
       photoFile ? "Сохраняем проверенную запись и фото." : "Сохраняем запись.",
     );
 
+    const savedAtIso = new Date().toISOString();
     let mealDraft: Parameters<typeof MealEntry.create>[0] = {
       ...reviewDraft,
-      eatenAtIso: new Date().toISOString(),
+      eatenAtIso: savedAtIso,
     };
 
     try {
@@ -1215,6 +1392,7 @@ export function NutritionDiary() {
 
     try {
       const meal = MealEntry.create(mealDraft);
+      const memoryEntry = upsertConfirmedMealMemory(reviewDraft, savedAtIso);
       journal.meals.$jazz.push(meal);
 
       if (meal.photo) {
@@ -1230,15 +1408,17 @@ export function NutritionDiary() {
       }
 
       await meal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
+      await memoryEntry.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
       await journal.meals.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
+      await loadedMealMemory.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
       await journal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
 
       clearMealComposer();
       setReviewDraft(null);
       setStatus(
         meal.photo
-          ? `Сохранено с AI-анализом и фото: ${meal.title}.`
-          : `Сохранено с AI-анализом: ${meal.title}.`,
+          ? `Сохранено с AI-анализом, фото и памятью: ${meal.title}.`
+          : `Сохранено с AI-анализом и памятью: ${meal.title}.`,
       );
     } catch (error) {
       setStatus(
@@ -1821,6 +2001,39 @@ export function NutritionDiary() {
                       Агент просит проверить порцию или состав перед сохранением.
                     </div>
                   ) : null}
+                  {reviewMemoryMatches.length > 0 ? (
+                    <div className="space-y-3 rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3">
+                      <div className="flex items-center gap-2">
+                        <Database
+                          className="size-4 text-[#225b43]"
+                          aria-hidden="true"
+                        />
+                        <p className="text-sm font-medium text-[#26302c]">
+                          Похожие подтверждения
+                        </p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {reviewMemoryMatches.map((entry) => (
+                          <div
+                            key={`${entry.normalizedTitle}-${entry.lastSeenAtIso}`}
+                            className="rounded-lg border border-[#dfe7e2] bg-white p-3"
+                          >
+                            <p className="line-clamp-2 text-sm font-medium text-[#26302c]">
+                              {entry.title}
+                            </p>
+                            <p className="mt-1 text-sm text-[#617069]">
+                              {entry.caloriesKcal} ккал · белок{" "}
+                              {entry.proteinGrams} г
+                            </p>
+                            <p className="mt-1 text-sm text-[#617069]">
+                              {entry.timesConfirmed} подтвержд. ·{" "}
+                              {formatJournalDate(entry.lastSeenAtIso.slice(0, 10))}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   {reviewDraft.usedToolsSummary ||
                   reviewDraft.identifiedFoodsSummary ? (
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -2238,6 +2451,42 @@ export function NutritionDiary() {
                     {item}
                   </button>
                 ))}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Database className="size-5 text-[#225b43]" aria-hidden="true" />
+                <h2 className="text-lg font-semibold">Знакомые блюда</h2>
+              </div>
+              <div className="mt-3 space-y-2">
+                {mealMemorySnapshots.length > 0 ? (
+                  mealMemorySnapshots.slice(0, 4).map((entry) => (
+                    <div
+                      key={`${entry.normalizedTitle}-${entry.lastSeenAtIso}`}
+                      className="rounded-lg border border-[#dfe7e2] bg-[#fbfcfb] p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 break-words text-sm font-medium text-[#26302c]">
+                          {entry.title}
+                        </p>
+                        <Badge
+                          variant="outline"
+                          className="h-7 shrink-0 rounded-lg border-[#cfd9d3] bg-white text-[#53625b]"
+                        >
+                          {entry.timesConfirmed}x
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-[#617069]">
+                        {entry.caloriesKcal} ккал · белок {entry.proteinGrams} г
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm leading-6 text-[#617069]">
+                    Появятся после сохранения проверенной еды.
+                  </p>
+                )}
               </div>
             </section>
           </aside>

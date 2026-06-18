@@ -12,9 +12,33 @@ export type PreviousMealSnapshot = {
   recommendation?: string;
 };
 
+export type MealMemorySnapshot = {
+  normalizedTitle: string;
+  title: string;
+  detail: string;
+  lastSeenAtIso: string;
+  timesConfirmed: number;
+  caloriesKcal: number;
+  proteinGrams: number;
+  fatGrams: number;
+  carbsGrams: number;
+  fiberGrams: number;
+  ironMilligrams: number;
+  potassiumMilligrams: number;
+  portionAssumption?: string;
+  identifiedFoodsSummary?: string;
+};
+
 export type PreviousMealMatch = PreviousMealSnapshot & {
   score: number;
   daysAgo: number;
+  source: "recent-meal";
+};
+
+export type MealMemoryMatch = MealMemorySnapshot & {
+  score: number;
+  daysAgo: number;
+  source: "confirmed-memory";
 };
 
 export function findSimilarMeals({
@@ -36,7 +60,10 @@ export function findSimilarMeals({
 
   return previousMeals
     .map((meal) => {
-      const score = scoreMeal(queryTokens, meal);
+      const score = scoreMeal(
+        queryTokens,
+        `${meal.title} ${meal.detail} ${meal.recommendation ?? ""}`,
+      );
       const daysAgo = Math.max(
         0,
         Math.round(
@@ -49,6 +76,7 @@ export function findSimilarMeals({
         ...meal,
         score,
         daysAgo,
+        source: "recent-meal" as const,
       };
     })
     .filter((meal) => meal.score > 0)
@@ -62,8 +90,57 @@ export function findSimilarMeals({
     .slice(0, limit);
 }
 
-function scoreMeal(queryTokens: string[], meal: PreviousMealSnapshot) {
-  const mealTokens = new Set(tokenize(`${meal.title} ${meal.detail}`));
+export function findSimilarMealMemory({
+  query,
+  mealMemory,
+  now = new Date(),
+  limit = 4,
+}: {
+  query: string;
+  mealMemory: MealMemorySnapshot[];
+  now?: Date;
+  limit?: number;
+}) {
+  const queryTokens = tokenize(query);
+
+  if (queryTokens.length === 0) {
+    return [];
+  }
+
+  return mealMemory
+    .map((meal) => {
+      const score = scoreMeal(
+        queryTokens,
+        `${meal.title} ${meal.detail} ${meal.identifiedFoodsSummary ?? ""}`,
+      );
+      const daysAgo = Math.max(
+        0,
+        Math.round(
+          (now.getTime() - new Date(meal.lastSeenAtIso).getTime()) /
+            (24 * 60 * 60 * 1000),
+        ),
+      );
+
+      return {
+        ...meal,
+        score: score + Math.min(3, meal.timesConfirmed),
+        daysAgo,
+        source: "confirmed-memory" as const,
+      };
+    })
+    .filter((meal) => meal.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.daysAgo - right.daysAgo;
+    })
+    .slice(0, limit);
+}
+
+function scoreMeal(queryTokens: string[], value: string) {
+  const mealTokens = new Set(tokenize(value));
 
   return queryTokens.reduce(
     (score, token) => score + (mealTokens.has(token) ? 1 : 0),

@@ -50,6 +50,25 @@ const PreviousMealSchema = z.object({
 
 const PreviousMealsSchema = z.array(PreviousMealSchema).max(20);
 
+const MealMemorySchema = z.object({
+  normalizedTitle: z.string(),
+  title: z.string(),
+  detail: z.string(),
+  lastSeenAtIso: z.string(),
+  timesConfirmed: z.number(),
+  caloriesKcal: z.number(),
+  proteinGrams: z.number(),
+  fatGrams: z.number(),
+  carbsGrams: z.number(),
+  fiberGrams: z.number(),
+  ironMilligrams: z.number(),
+  potassiumMilligrams: z.number(),
+  portionAssumption: z.string().optional(),
+  identifiedFoodsSummary: z.string().optional(),
+});
+
+const MealMemoryListSchema = z.array(MealMemorySchema).max(50);
+
 export async function POST(request: Request) {
   let agentRuntime: NutritionAgentRuntime;
 
@@ -73,6 +92,7 @@ export async function POST(request: Request) {
   let profile: z.infer<typeof NutritionProfileSchema>;
   let goal: z.infer<typeof GoalSchema>;
   let targets: z.infer<typeof TargetsSchema>;
+  let mealMemory: z.infer<typeof MealMemoryListSchema>;
   let previousMeals: z.infer<typeof PreviousMealsSchema>;
 
   try {
@@ -80,6 +100,7 @@ export async function POST(request: Request) {
     profile = parseJsonField(formData, "profile", NutritionProfileSchema);
     goal = parseJsonField(formData, "goal", GoalSchema);
     targets = parseJsonField(formData, "targets", TargetsSchema);
+    mealMemory = parseJsonField(formData, "mealMemory", MealMemoryListSchema);
     previousMeals = parseOptionalJsonField(
       formData,
       "previousMeals",
@@ -145,6 +166,7 @@ export async function POST(request: Request) {
       profile,
       goal,
       targets,
+      mealMemory,
       previousMeals,
     });
 

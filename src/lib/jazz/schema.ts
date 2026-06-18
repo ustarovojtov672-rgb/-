@@ -60,6 +60,25 @@ export const MealEntry = co.map({
 
 export const MealEntries = co.list(MealEntry);
 
+export const MealMemoryEntry = co.map({
+  normalizedTitle: z.string(),
+  title: z.string(),
+  detail: z.string(),
+  lastSeenAtIso: z.string(),
+  timesConfirmed: z.number(),
+  caloriesKcal: z.number(),
+  proteinGrams: z.number(),
+  carbsGrams: z.number(),
+  fatGrams: z.number(),
+  fiberGrams: z.number(),
+  ironMilligrams: z.number(),
+  potassiumMilligrams: z.number(),
+  portionAssumption: z.string().optional(),
+  identifiedFoodsSummary: z.string().optional(),
+});
+
+export const MealMemoryEntries = co.list(MealMemoryEntry);
+
 export const NutritionJournal = co.map({
   dateIso: z.string(),
   goal: NutritionGoal,
@@ -74,6 +93,7 @@ export const NutritionAccount = co
     root: co.map({
       userProfile: NutritionUserProfile.optional(),
       journal: NutritionJournal,
+      mealMemory: MealMemoryEntries.optional(),
     }),
   })
   .withMigration(async (account, creationProps) => {
@@ -87,6 +107,7 @@ export const NutritionAccount = co
       account.$jazz.set("root", {
         userProfile: createInitialUserProfile(),
         journal: createInitialJournal(),
+        mealMemory: [],
       });
     }
 
@@ -96,6 +117,10 @@ export const NutritionAccount = co
 
     if (root?.$isLoaded && !root.$jazz.has("userProfile")) {
       root.$jazz.set("userProfile", createInitialUserProfile());
+    }
+
+    if (root?.$isLoaded && !root.$jazz.has("mealMemory")) {
+      root.$jazz.set("mealMemory", []);
     }
   });
 

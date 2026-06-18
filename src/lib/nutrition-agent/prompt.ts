@@ -3,7 +3,10 @@ import type {
   NutritionProfileData,
   NutritionTargets,
 } from "@/lib/nutrition/targets";
-import type { PreviousMealSnapshot } from "@/lib/nutrition-agent/memory";
+import type {
+  MealMemorySnapshot,
+  PreviousMealSnapshot,
+} from "@/lib/nutrition-agent/memory";
 import {
   summarizeToolPlanForPrompt,
   type NutritionAgentToolPlan,
@@ -19,6 +22,7 @@ export type NutritionAgentPromptInput = {
   profile: NutritionProfileData;
   goal: NutritionAgentGoal;
   targets: NutritionTargets;
+  mealMemory: MealMemorySnapshot[];
   previousMeals: PreviousMealSnapshot[];
   toolPlan: NutritionAgentToolPlan;
   hasPhoto: boolean;
@@ -29,6 +33,7 @@ export function buildNutritionAgentPrompt({
   profile,
   goal,
   targets,
+  mealMemory,
   previousMeals,
   toolPlan,
   hasPhoto,
@@ -55,6 +60,7 @@ export function buildNutritionAgentPrompt({
     "- Верни только JSON без Markdown, пояснений до JSON и текста после JSON.",
     "",
     `Похожие прошлые приемы: ${JSON.stringify(toolPlan.memoryMatches)}`,
+    `Подтвержденная память блюд: ${JSON.stringify(mealMemory.slice(0, 12))}`,
     `Последние приемы для контекста: ${JSON.stringify(previousMeals.slice(0, 8))}`,
     `Локальные совпадения базы продуктов: ${JSON.stringify(toolPlan.databaseMatches)}`,
   ].join("\n");

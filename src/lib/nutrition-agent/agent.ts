@@ -18,6 +18,7 @@ export async function analyzeMealWithNutritionAgent({
   profile,
   goal,
   targets,
+  mealMemory,
   previousMeals,
 }: NutritionAgentInput): Promise<MealAnalysisResult> {
   if (!apiKey) {
@@ -27,6 +28,7 @@ export async function analyzeMealWithNutritionAgent({
   const toolPlan = buildNutritionAgentToolPlan({
     description,
     hasPhoto: photoFile !== null,
+    mealMemory,
     previousMeals,
   });
   const content: Array<
@@ -40,6 +42,7 @@ export async function analyzeMealWithNutritionAgent({
         profile,
         goal,
         targets,
+        mealMemory,
         previousMeals,
         toolPlan,
         hasPhoto: photoFile !== null,
