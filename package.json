@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "jazz:sync": "jazz-run sync --host 127.0.0.1 --port 4200 --db ./.jazz-sync/storage.db",
     "build:web": "next build",
     "build:mobile": "set NEXT_OUTPUT=export&& next build",
     "cap:sync": "npm run build:mobile && cap sync",
@@ -47,6 +48,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "jazz-run": "^0.20.18",
     "serve": "^14.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"

@@ -3,6 +3,9 @@ set shell := ["C:/Program Files/Git/bin/bash.exe", "-lc"]
 dev:
   npm run dev
 
+jazz-sync:
+  npm run jazz:sync
+
 build:
   npm run build
 

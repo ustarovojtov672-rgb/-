@@ -1,0 +1,11 @@
+{
+  "package": "jazz-tools",
+  "mode": "sync",
+  "storage": "indexedDB",
+  "sync": {
+    "peer": "ws://127.0.0.1:4200",
+    "when": "always"
+  },
+  "schema": "../src/lib/jazz/schema.ts",
+  "provider": "../src/components/jazz-sync-provider.tsx"
+}

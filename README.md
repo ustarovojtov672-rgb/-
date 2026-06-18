@@ -7,16 +7,31 @@
 - Next.js App Router, TypeScript, Tailwind CSS
 - shadcn/ui
 - Capacitor с `webDir: "out"`
-- Локальный Jazz `jazz-tools` для local-first данных
+- Jazz `jazz-tools` + локально запущенный sync-сервер для будущей облачной синхронизации
 - Pi Coding Agent и `pi-codex-search` для поиска через Codex auth
 - Nutrition agent для анализа еды через память, фото, OCR, локальную базу и web search
 - `just-bash` как bash runtime для агентских сценариев
 
 ## Запуск
 
+Подготовьте зависимости и env:
+
 ```bash
 npm install
 cp .env.example .env.local
+```
+
+В первом терминале запустите локальный Jazz sync-сервер:
+
+```bash
+npm run jazz:sync
+```
+
+Он слушает `ws://127.0.0.1:4200` и хранит данные в `.jazz-sync/storage.db`.
+
+Во втором терминале запустите приложение:
+
+```bash
 npm run dev
 ```
 
@@ -58,9 +73,17 @@ npm install @capacitor/android
 npx cap add android
 ```
 
-## Локальный Jazz
+## Jazz Sync
 
-Схема питания лежит в `src/lib/jazz/schema.ts`. Локальный режим описан в `Локальный jazz.tools/`: данные остаются в IndexedDB, синхронизация с Jazz Cloud отключена.
+Схема питания лежит в `src/lib/jazz/schema.ts`. Приложение не делит данные на локальный и облачный режимы: клиент всегда использует Jazz sync peer из `NEXT_PUBLIC_JAZZ_SYNC_PEER`.
+
+Для разработки это локальный сервер:
+
+```env
+NEXT_PUBLIC_JAZZ_SYNC_PEER=ws://127.0.0.1:4200
+```
+
+Когда сервер переедет на VPS или другой хостинг, меняется только этот URL, а схема данных и UI остаются теми же.
 
 ## Pi Codex search
 

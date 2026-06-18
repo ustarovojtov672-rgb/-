@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { LocalJazzProvider } from "@/components/local-jazz-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="ru" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <LocalJazzProvider>{children}</LocalJazzProvider>
+        {children}
       </body>
     </html>
   );

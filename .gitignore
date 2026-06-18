@@ -25,6 +25,7 @@
 .DS_Store
 *.pem
 .pi/npm/
+.jazz-sync/
 Аi агент для поиска/.pi-agent/
 Аi агент для поиска/sessions/
 Аi агент питания/.pi-agent/
