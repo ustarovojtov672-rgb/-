@@ -2977,7 +2977,7 @@ export function NutritionDiary() {
               </div>
 
               {meals.length > 0 ? (
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-4 grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {meals.map((meal) => {
                     const photoId = meal.$jazz.refs.photo?.id;
                     const isExpanded = expandedMealId === meal.$jazz.id;
