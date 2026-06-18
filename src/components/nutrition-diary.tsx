@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  useCallback,
+  useEffect,
   useSyncExternalStore,
   useState,
   type ChangeEvent,
@@ -12,8 +14,10 @@ import {
   Apple,
   ArrowRight,
   Beef,
+  Bot,
   Camera,
   CheckCircle2,
+  CircleAlert,
   Cloud,
   Flame,
   ImagePlus,
@@ -23,6 +27,7 @@ import {
   MessageSquareText,
   Plus,
   Database,
+  RefreshCw,
   Salad,
   Send,
   Sparkles,
@@ -49,6 +54,7 @@ import { authClient } from "@/lib/auth/client";
 import { MealEntry, MealMemoryEntry, NutritionAccount } from "@/lib/jazz/schema";
 import {
   mealAnalysisToolLabels,
+  type MealAgentStatusResponse,
   type MealAnalysisResponse,
   type MealAnalysisResult,
 } from "@/lib/nutrition/meal-analysis";
@@ -69,6 +75,13 @@ import { cn } from "@/lib/utils";
 
 type MealSource = "text" | "photo" | "text-photo";
 type AuthMode = "sign-in" | "sign-up";
+type AnalysisPhase =
+  | "idle"
+  | "checking"
+  | "analyzing"
+  | "review"
+  | "failed"
+  | "saving";
 
 type Goal = {
   id: GoalId;
@@ -257,6 +270,7 @@ const biologicalSexOptions: BiologicalSex[] = ["female", "male"];
 const activityOptions: ActivityLevel[] = ["low", "medium", "high"];
 const mealAnalysisEndpoint =
   process.env.NEXT_PUBLIC_MEAL_ANALYSIS_ENDPOINT ?? "/api/analyze-meal";
+const mealAgentStatusEndpoint = mealAnalysisEndpoint;
 const syncSaveTimeoutMs = 10000;
 const mealMemoryLimit = 50;
 const reviewNumberFields: Array<{
@@ -610,12 +624,19 @@ async function analyzeMeal({
   const payload = (await response.json()) as MealAnalysisResponse;
 
   if (!response.ok || !("meal" in payload)) {
-    const message =
-      "error" in payload ? payload.error : "AI не вернул расчет еды.";
-    throw new Error(message);
+    throw new Error(readableMealAnalysisError(payload));
   }
 
   return payload.meal;
+}
+
+function readableMealAnalysisError(payload: MealAnalysisResponse) {
+  if (!("error" in payload)) {
+    return "AI не вернул расчет еды.";
+  }
+
+  const prefix = payload.code ? `${payload.code}: ` : "";
+  return `${prefix}${payload.error}`;
 }
 
 function formatMealTime(eatenAtIso: string) {
@@ -858,6 +879,171 @@ function SourceLinks({ value }: { value: string | undefined }) {
   );
 }
 
+function AgentStatusPanel({
+  status,
+  error,
+  isBusy,
+  onRefresh,
+}: {
+  status: MealAgentStatusResponse | null;
+  error: string;
+  isBusy: boolean;
+  onRefresh: () => void;
+}) {
+  const isReady = status?.ok ?? false;
+
+  return (
+    <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Bot className="size-5 shrink-0 text-[#225b43]" aria-hidden="true" />
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">AI-агент</h2>
+            <p className="mt-1 text-sm leading-5 text-[#617069]">
+              {status
+                ? `${status.runtime} · ${status.model ?? "модель не указана"}`
+                : "Проверяем конфигурацию."}
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Проверить AI-агента"
+          disabled={isBusy}
+          onClick={onRefresh}
+          className="size-9 shrink-0"
+        >
+          <RefreshCw
+            className={cn("size-4", isBusy ? "animate-spin" : "")}
+            aria-hidden="true"
+          />
+        </Button>
+      </div>
+
+      <div
+        className={cn(
+          "mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
+          isReady
+            ? "bg-[#e7f1eb] text-[#225b43]"
+            : "bg-[#fff8f4] text-[#704037]",
+        )}
+      >
+        {isReady ? (
+          <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+        ) : (
+          <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
+        )}
+        <span>
+          {isReady
+            ? "Готов к анализу еды."
+            : error || "Нужна проверка настроек агента."}
+        </span>
+      </div>
+
+      {status ? (
+        <div className="mt-3 divide-y divide-[#dfe7e2]">
+          {status.checks.map((check) => (
+            <div key={check.id} className="py-2">
+              <div className="flex items-start gap-2">
+                {check.ok ? (
+                  <CheckCircle2
+                    className="mt-0.5 size-4 shrink-0 text-[#225b43]"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <CircleAlert
+                    className="mt-0.5 size-4 shrink-0 text-[#a6544b]"
+                    aria-hidden="true"
+                  />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[#26302c]">
+                    {check.label}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-[#617069]">
+                    {check.detail}
+                  </p>
+                  {!check.ok && check.action ? (
+                    <p className="mt-1 text-sm leading-5 text-[#704037]">
+                      {check.action}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AnalysisStateBanner({
+  phase,
+  error,
+  status,
+}: {
+  phase: AnalysisPhase;
+  error: string;
+  status: MealAgentStatusResponse | null;
+}) {
+  if (phase === "idle" && !error && status?.ok !== false) {
+    return null;
+  }
+
+  if (phase === "checking") {
+    return (
+      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
+        Проверяем AI-агента перед анализом.
+      </div>
+    );
+  }
+
+  if (phase === "analyzing") {
+    return (
+      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
+        Агент анализирует текст, фото, память, локальную базу и web search.
+      </div>
+    );
+  }
+
+  if (phase === "review") {
+    return (
+      <div className="rounded-lg border border-[#c9ddcf] bg-[#edf3ef] p-3 text-sm leading-5 text-[#225b43]">
+        Расчет готов. Проверь порцию и нутриенты перед сохранением.
+      </div>
+    );
+  }
+
+  if (phase === "saving") {
+    return (
+      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
+        Сохраняем запись, фото и память блюда в Jazz.
+      </div>
+    );
+  }
+
+  if (status?.ok === false) {
+    return (
+      <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
+        AI-агент не готов. Открой блок «AI-агент» и исправь красные пункты.
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
+        {error}
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function MacroBar({
   label,
   value,
@@ -980,7 +1166,53 @@ export function NutritionDiary() {
   const [isMealBusy, setIsMealBusy] = useState(false);
   const [isPhotoDragActive, setIsPhotoDragActive] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
+  const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>("checking");
+  const [agentStatus, setAgentStatus] =
+    useState<MealAgentStatusResponse | null>(null);
+  const [agentStatusError, setAgentStatusError] = useState("");
+  const [isAgentStatusBusy, setIsAgentStatusBusy] = useState(false);
   const [status, setStatus] = useState("Дневник синхронизируется через Jazz.");
+
+  const refreshAgentStatus = useCallback(async () => {
+    setIsAgentStatusBusy(true);
+    setAgentStatusError("");
+
+    try {
+      const response = await fetch(mealAgentStatusEndpoint, {
+        method: "GET",
+        headers: { accept: "application/json" },
+      });
+      const payload = (await response.json()) as MealAgentStatusResponse;
+
+      if (!response.ok) {
+        throw new Error("Не удалось проверить AI-агента.");
+      }
+
+      setAgentStatus(payload);
+      setAgentStatusError("");
+    } catch (error) {
+      setAgentStatus(null);
+      setAgentStatusError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось проверить AI-агента.",
+      );
+    } finally {
+      setIsAgentStatusBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshAgentStatus().finally(() => {
+        setAnalysisPhase((current) =>
+          current === "checking" ? "idle" : current,
+        );
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [refreshAgentStatus]);
 
   if (!account.$isLoaded) {
     return <LoadingDiary />;
@@ -1147,6 +1379,7 @@ export function NutritionDiary() {
 
     if (!file.type.startsWith("image/")) {
       setAnalysisError("Нужен файл изображения.");
+      setAnalysisPhase("failed");
       setStatus("Фото не добавлено: файл не похож на изображение.");
       return;
     }
@@ -1156,6 +1389,7 @@ export function NutritionDiary() {
     setPhotoPreview(URL.createObjectURL(file));
     setReviewDraft(null);
     setAnalysisError("");
+    setAnalysisPhase("idle");
     setStatus("Фото добавлено. Нажми «Добавить», чтобы запустить анализ.");
   }
 
@@ -1176,6 +1410,7 @@ export function NutritionDiary() {
 
     if (!file) {
       setAnalysisError("Перетащи сюда файл изображения.");
+      setAnalysisPhase("failed");
       setStatus("Фото не добавлено.");
       return;
     }
@@ -1279,11 +1514,20 @@ export function NutritionDiary() {
 
     if (!hasText && !hasPhoto) {
       setStatus("Добавь текст или фото еды.");
+      setAnalysisPhase("idle");
+      return;
+    }
+
+    if (agentStatus?.ok === false) {
+      setAnalysisError("AI-агент не готов. Исправь красные пункты в диагностике.");
+      setAnalysisPhase("failed");
+      setStatus("AI-анализ не запущен: агент не готов.");
       return;
     }
 
     setIsMealBusy(true);
     setAnalysisError("");
+    setAnalysisPhase("analyzing");
     setStatus("Анализируем еду через AI.");
 
     try {
@@ -1303,13 +1547,16 @@ export function NutritionDiary() {
       });
 
       setReviewDraft(mealDraft);
+      setAnalysisPhase("review");
       setStatus("Проверь AI-расчет перед сохранением.");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "AI-анализ не прошел.";
 
       setAnalysisError(message);
+      setAnalysisPhase("failed");
       setStatus("AI-анализ не прошел.");
+      void refreshAgentStatus();
     } finally {
       setIsMealBusy(false);
     }
@@ -1356,11 +1603,14 @@ export function NutritionDiary() {
 
     if (!normalizeMealMemoryTitle(reviewDraft.title)) {
       setAnalysisError("Введите название блюда перед сохранением.");
+      setAnalysisPhase("failed");
       setStatus("Запись не сохранена: название пустое.");
       return;
     }
 
     setIsMealBusy(true);
+    setAnalysisError("");
+    setAnalysisPhase("saving");
     setStatus(
       photoFile ? "Сохраняем проверенную запись и фото." : "Сохраняем запись.",
     );
@@ -1386,6 +1636,7 @@ export function NutritionDiary() {
       }
     } catch (error) {
       setStatus("Не удалось сохранить фото.");
+      setAnalysisPhase("failed");
       setIsMealBusy(false);
       throw error;
     }
@@ -1415,12 +1666,14 @@ export function NutritionDiary() {
 
       clearMealComposer();
       setReviewDraft(null);
+      setAnalysisPhase("idle");
       setStatus(
         meal.photo
           ? `Сохранено с AI-анализом, фото и памятью: ${meal.title}.`
           : `Сохранено с AI-анализом и памятью: ${meal.title}.`,
       );
     } catch (error) {
+      setAnalysisPhase("failed");
       setStatus(
         "Не удалось полностью сохранить запись в Jazz.",
       );
@@ -1432,6 +1685,8 @@ export function NutritionDiary() {
 
   function cancelReviewDraft() {
     setReviewDraft(null);
+    setAnalysisError("");
+    setAnalysisPhase("idle");
     setStatus("AI-расчет отменен.");
   }
 
@@ -1906,20 +2161,26 @@ export function NutritionDiary() {
                 )}
               </div>
 
-              {analysisError ? (
-                <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
-                  {analysisError}
-                </div>
-              ) : null}
+              <AnalysisStateBanner
+                phase={analysisPhase}
+                error={analysisError}
+                status={agentStatus}
+              />
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                 <Button
                   type="submit"
                   className="h-10 gap-2 px-4"
-                  disabled={isMealBusy}
+                  disabled={
+                    isMealBusy ||
+                    analysisPhase === "checking" ||
+                    agentStatus?.ok === false
+                  }
                 >
                   {isMealBusy
-                    ? "Анализируем"
+                    ? analysisPhase === "saving"
+                      ? "Сохраняем"
+                      : "Анализируем"
                     : reviewDraft
                       ? "Пересчитать"
                       : "Добавить"}
@@ -2249,6 +2510,13 @@ export function NutritionDiary() {
           </section>
 
           <aside className="space-y-4">
+            <AgentStatusPanel
+              status={agentStatus}
+              error={agentStatusError}
+              isBusy={isAgentStatusBusy}
+              onRefresh={refreshAgentStatus}
+            />
+
             <section className="rounded-lg border border-[#17352f] bg-[#17352f] p-4 text-white shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>

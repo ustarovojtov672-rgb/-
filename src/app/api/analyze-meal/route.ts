@@ -1,7 +1,11 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { z } from "zod";
 
 import { analyzeMealWithNutritionAgent } from "@/lib/nutrition-agent/agent";
 import { analyzeMealWithPiNutritionAgent } from "@/lib/nutrition-agent/pi-agent";
+import type { MealAgentStatusCheck } from "@/lib/nutrition/meal-analysis";
 import type {
   NutritionAgentInput,
   NutritionAgentRuntime,
@@ -10,6 +14,8 @@ import type {
 export const runtime = "nodejs";
 
 const maxPhotoBytes = 8 * 1024 * 1024;
+const piAgentProvider = process.env.PI_NUTRITION_AGENT_PROVIDER ?? "openai-codex";
+const piAgentModel = process.env.PI_NUTRITION_AGENT_MODEL ?? "gpt-5.5";
 
 const NutritionProfileSchema = z.object({
   biologicalSex: z.enum(["female", "male"]),
@@ -68,6 +74,49 @@ const MealMemorySchema = z.object({
 });
 
 const MealMemoryListSchema = z.array(MealMemorySchema).max(50);
+
+export async function GET() {
+  let agentRuntime: NutritionAgentRuntime;
+
+  try {
+    agentRuntime = configuredNutritionAgentRuntime();
+  } catch (error) {
+    return Response.json({
+      ok: false,
+      runtime: "invalid",
+      checkedAtIso: new Date().toISOString(),
+      checks: [
+        {
+          id: "runtime",
+          label: "Runtime агента",
+          ok: false,
+          detail:
+            error instanceof Error
+              ? error.message
+              : "Некорректный runtime агента питания.",
+          action: "Проверь NUTRITION_AGENT_RUNTIME в .env.local.",
+        },
+      ],
+    });
+  }
+
+  const checks =
+    agentRuntime === "pi" ? buildPiStatusChecks() : buildOpenAiStatusChecks();
+
+  return Response.json({
+    ok: checks.every((check) => check.ok),
+    runtime: agentRuntime,
+    provider: agentRuntime === "pi" ? piAgentProvider : "openai",
+    model:
+      agentRuntime === "pi"
+        ? piAgentModel
+        : process.env.OPENAI_NUTRITION_AGENT_MODEL ??
+          process.env.OPENAI_MEAL_MODEL ??
+          "gpt-5.5",
+    checkedAtIso: new Date().toISOString(),
+    checks,
+  });
+}
 
 export async function POST(request: Request) {
   let agentRuntime: NutritionAgentRuntime;
@@ -183,6 +232,100 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+}
+
+function buildPiStatusChecks(): MealAgentStatusCheck[] {
+  const projectDir = process.cwd();
+  const agentWorkspace = path.join(projectDir, "Аi агент питания");
+  const agentStateDir =
+    process.env.PI_NUTRITION_AGENT_DIR ?? path.join(agentWorkspace, ".pi-agent");
+  const authPath = path.join(agentStateDir, "auth.json");
+  const nutritionSkillPath = path.join(
+    agentWorkspace,
+    "skills",
+    "nutrition-agent",
+    "SKILL.md",
+  );
+  const searchSkillPath = path.join(
+    agentWorkspace,
+    "skills",
+    "codex-search",
+    "SKILL.md",
+  );
+  const codexSearchPackagePath = path.join(
+    projectDir,
+    ".pi",
+    "npm",
+    "node_modules",
+    "pi-codex-search",
+    "package.json",
+  );
+
+  return [
+    {
+      id: "runtime",
+      label: "Runtime агента",
+      ok: true,
+      detail: "Используется локальный Pi-агент питания.",
+    },
+    {
+      id: "pi-auth",
+      label: "Codex auth",
+      ok: existsSync(authPath),
+      detail: existsSync(authPath)
+        ? "Локальная авторизация Pi найдена."
+        : "Локальная авторизация Pi не найдена.",
+      action:
+        "Запусти npm run nutrition-agent:sync-codex-auth или npm run nutrition-agent:login.",
+    },
+    {
+      id: "nutrition-skill",
+      label: "Nutrition skill",
+      ok: existsSync(nutritionSkillPath),
+      detail: existsSync(nutritionSkillPath)
+        ? "Основной skill агента питания найден."
+        : "Основной skill агента питания отсутствует.",
+      action: "Проверь папку Аi агент питания/skills/nutrition-agent.",
+    },
+    {
+      id: "search-skill",
+      label: "Web search skill",
+      ok: existsSync(searchSkillPath),
+      detail: existsSync(searchSkillPath)
+        ? "Search skill встроен в агента питания."
+        : "Search skill не найден внутри агента питания.",
+      action: "Проверь папку Аi агент питания/skills/codex-search.",
+    },
+    {
+      id: "codex-search-tool",
+      label: "codex_search",
+      ok: existsSync(codexSearchPackagePath),
+      detail: existsSync(codexSearchPackagePath)
+        ? "Project-local пакет pi-codex-search установлен."
+        : "Project-local пакет pi-codex-search не установлен.",
+      action: "Запусти npm run pi:install-codex-search.",
+    },
+  ];
+}
+
+function buildOpenAiStatusChecks(): MealAgentStatusCheck[] {
+  const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
+
+  return [
+    {
+      id: "runtime",
+      label: "Runtime агента",
+      ok: true,
+      detail: "Используется прямой OpenAI runtime.",
+    },
+    {
+      id: "openai-key",
+      label: "OpenAI API key",
+      ok: hasApiKey,
+      detail: hasApiKey ? "OPENAI_API_KEY задан." : "OPENAI_API_KEY не задан.",
+      action: "Добавь OPENAI_API_KEY в .env.local и перезапусти npm run dev.",
+    },
+  ];
 }
 
 async function analyzeMeal({

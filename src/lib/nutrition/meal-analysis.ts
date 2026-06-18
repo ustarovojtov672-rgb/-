@@ -64,3 +64,20 @@ export type MealAnalysisErrorResponse = {
 export type MealAnalysisResponse =
   | MealAnalysisSuccessResponse
   | MealAnalysisErrorResponse;
+
+export type MealAgentStatusCheck = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  action?: string;
+};
+
+export type MealAgentStatusResponse = {
+  ok: boolean;
+  runtime: "pi" | "openai" | "invalid";
+  provider?: string;
+  model?: string;
+  checkedAtIso: string;
+  checks: MealAgentStatusCheck[];
+};
