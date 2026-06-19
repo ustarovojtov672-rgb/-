@@ -8,7 +8,7 @@ import { authEnv } from "@/lib/auth/env";
 export const auth = betterAuth({
   baseURL: authEnv.betterAuthUrl,
   secret: authEnv.betterAuthSecret,
-  trustedOrigins: [authEnv.betterAuthUrl],
+  trustedOrigins: trustedAuthOrigins(authEnv.betterAuthUrl),
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
@@ -21,3 +21,24 @@ export const auth = betterAuth({
   }),
   plugins: [jazzPlugin(), nextCookies()],
 });
+
+function trustedAuthOrigins(baseUrl: string) {
+  const url = new URL(baseUrl);
+  const origins = new Set([url.origin]);
+
+  if (isLoopbackHost(url.hostname)) {
+    const port = url.port ? `:${url.port}` : "";
+
+    origins.add(`${url.protocol}//localhost${port}`);
+    origins.add(`${url.protocol}//127.0.0.1${port}`);
+    origins.add(`${url.protocol}//[::1]${port}`);
+  }
+
+  return Array.from(origins);
+}
+
+function isLoopbackHost(hostname: string) {
+  const host = hostname.replace(/^\[|\]$/g, "");
+
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
