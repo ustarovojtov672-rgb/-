@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useSyncExternalStore,
   useState,
   type ChangeEvent,
@@ -59,7 +60,14 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { authClient } from "@/lib/auth/client";
-import { MealEntry, MealMemoryEntry, NutritionAccount } from "@/lib/jazz/schema";
+import {
+  createNutritionJournal,
+  MealEntry,
+  MealMemoryEntry,
+  NutritionAccount,
+  NutritionJournal,
+  todayDateIso,
+} from "@/lib/jazz/schema";
 import {
   mealAnalysisToolLabels,
   type MealAgentStatusResponse,
@@ -284,6 +292,12 @@ const sourceLabels: Record<MealSource, string> = {
   "text-photo": "текст и фото",
 };
 
+const starterMealTitles = new Set([
+  "Овсянка, банан, кофе с молоком",
+  "Курица, рис, салат",
+  "Греческий йогурт и ягоды",
+]);
+
 const confidenceSignalLabels: Record<MealAnalysisTool, string> = {
   vision: "фото",
   ocr: "этикетка",
@@ -500,6 +514,18 @@ function sumMeals(meals: MealDraft[]) {
       iron: 0,
       potassium: 0,
     },
+  );
+}
+
+function isStarterMealSet(meals: MealDraft[]) {
+  return (
+    meals.length === starterMealTitles.size &&
+    meals.every(
+      (meal) =>
+        starterMealTitles.has(meal.title) &&
+        meal.confidencePercent === undefined &&
+        meal.agentSummary === undefined,
+    )
   );
 }
 
@@ -1259,11 +1285,13 @@ export function NutritionDiary() {
       profile: true,
       root: {
         userProfile: true,
-        journal: {
-          goal: true,
-          meals: {
-            $each: {
-              photo: true,
+        journals: {
+          $each: {
+            goal: true,
+            meals: {
+              $each: {
+                photo: true,
+              },
             },
           },
         },
@@ -1296,6 +1324,10 @@ export function NutritionDiary() {
   const [status, setStatus] = useState("Дневник синхронизируется через Jazz.");
   const [activeTab, setActiveTab] = useState<AppTab>("add");
   const [expandedMealId, setExpandedMealId] = useState<string | null>(null);
+  const [journalBootstrapError, setJournalBootstrapError] = useState("");
+  const lastAccountIdRef = useRef<string | null>(null);
+  const currentAccountId = account.$isLoaded ? account.$jazz.id : null;
+  const currentDateIso = todayDateIso();
 
   const refreshAgentStatus = useCallback(async () => {
     try {
@@ -1327,11 +1359,115 @@ export function NutritionDiary() {
     return () => window.clearTimeout(timer);
   }, [refreshAgentStatus]);
 
+  useEffect(() => {
+    if (!currentAccountId || lastAccountIdRef.current === currentAccountId) {
+      return;
+    }
+
+    lastAccountIdRef.current = currentAccountId;
+    const timer = window.setTimeout(() => {
+      setMealText("");
+      setPhotoFile(null);
+      setPhotoName("");
+      setPhotoPreview((current) => {
+        if (current) {
+          URL.revokeObjectURL(current);
+        }
+
+        return null;
+      });
+      setPhotoInputKey((key) => key + 1);
+      setReviewDraft(null);
+      setReviewClarification("");
+      setAnalysisError("");
+      setAnalysisPhase("idle");
+      setIsPhotoDragActive(false);
+      setActiveTab("add");
+      setExpandedMealId(null);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [currentAccountId]);
+
+  useEffect(() => {
+    if (!account.$isLoaded) {
+      return;
+    }
+
+    const journals = account.root.journals;
+    const userProfile = account.root.userProfile;
+
+    if (!journals?.$isLoaded || !userProfile?.$isLoaded) {
+      return;
+    }
+
+    const todayJournal = journals.find((item) => item.dateIso === currentDateIso);
+
+    if (todayJournal) {
+      if (isStarterMealSet([...todayJournal.meals])) {
+        todayJournal.meals.$jazz.splice(0, todayJournal.meals.length);
+
+        void Promise.all([
+          todayJournal.meals.$jazz.waitForSync({ timeout: syncSaveTimeoutMs }),
+          todayJournal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs }),
+        ])
+          .then(() => {
+            setStatus("Стартовые демо-записи очищены.");
+          })
+          .catch((error: unknown) => {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Стартовые демо-записи не синхронизировались.";
+            setJournalBootstrapError(message);
+            setStatus("Не удалось синхронизировать очистку дневника.");
+          });
+      }
+
+      const timer = window.setTimeout(() => {
+        setJournalBootstrapError("");
+      }, 0);
+
+      return () => window.clearTimeout(timer);
+    }
+
+    const latestJournal = [...journals].sort(
+      (left, right) => right.dateIso.localeCompare(left.dateIso),
+    )[0];
+    const goalId = latestJournal?.goal.mode ?? "cut";
+    const nextJournal = NutritionJournal.create(
+      createNutritionJournal({
+        dateIso: currentDateIso,
+        profile: profileSnapshot(userProfile),
+        goalId,
+      }),
+    );
+
+    journals.$jazz.unshift(nextJournal);
+
+    void Promise.all([
+      nextJournal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs }),
+      journals.$jazz.waitForSync({ timeout: syncSaveTimeoutMs }),
+    ])
+      .then(() => {
+        setJournalBootstrapError("");
+        setStatus("Сегодняшний дневник готов и синхронизирован.");
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Сегодняшний дневник не синхронизировался.";
+        setJournalBootstrapError(message);
+        setStatus("Не удалось синхронизировать сегодняшний дневник.");
+      });
+  }, [account, currentDateIso]);
+
   if (!account.$isLoaded) {
     return <LoadingDiary />;
   }
 
-  const journal = account.root.journal;
+  const journals = account.root.journals;
   const accountProfile = account.profile;
   const userProfile = account.root.userProfile;
   const mealMemory = account.root.mealMemory;
@@ -1348,16 +1484,36 @@ export function NutritionDiary() {
     return <LoadingDiary />;
   }
 
+  if (!journals) {
+    throw new Error("Nutrition journals were not initialized by Jazz migration.");
+  }
+
+  if (!journals.$isLoaded) {
+    return <LoadingDiary />;
+  }
+
+  if (journalBootstrapError) {
+    throw new Error(journalBootstrapError);
+  }
+
   const loadedMealMemory = mealMemory;
+  const loadedJournals = journals;
   const loadedUserProfile = userProfile;
+  const journal = loadedJournals.find((item) => item.dateIso === currentDateIso);
+
+  if (!journal) {
+    return <LoadingDiary />;
+  }
+
+  const activeJournal = journal;
   const nutritionProfile = profileSnapshot(loadedUserProfile);
-  const selectedGoal = journal.goal.mode;
+  const selectedGoal = activeJournal.goal.mode;
   const goalOption = goalById(selectedGoal);
   const goal: GoalWithTargets = {
     ...goalOption,
     targets: calculateNutritionTargets(nutritionProfile, selectedGoal),
   };
-  const meals = [...journal.meals].sort(
+  const meals = [...activeJournal.meals].sort(
     (left, right) =>
       new Date(right.eatenAtIso).getTime() -
       new Date(left.eatenAtIso).getTime(),
@@ -1569,7 +1725,7 @@ export function NutritionDiary() {
     const nextGoal = goalById(goalId);
     const targets = calculateNutritionTargets(nutritionProfile, goalId);
 
-    journal.goal.$jazz.applyDiff({
+    activeJournal.goal.$jazz.applyDiff({
       mode: nextGoal.id,
       ...targetDiff(targets),
     });
@@ -1585,7 +1741,7 @@ export function NutritionDiary() {
     const targets = calculateNutritionTargets(nextProfile, selectedGoal);
 
     loadedUserProfile.$jazz.applyDiff(patch);
-    journal.goal.$jazz.applyDiff({
+    activeJournal.goal.$jazz.applyDiff({
       mode: selectedGoal,
       ...targetDiff(targets),
     });
@@ -1828,7 +1984,7 @@ export function NutritionDiary() {
     try {
       const meal = MealEntry.create(mealDraft);
       const memoryEntry = upsertConfirmedMealMemory(draftToSave, savedAtIso);
-      journal.meals.$jazz.push(meal);
+      activeJournal.meals.$jazz.push(meal);
 
       if (meal.photo) {
         for (const streamRef of Object.values(meal.photo.$jazz.refs)) {
@@ -1844,9 +2000,9 @@ export function NutritionDiary() {
 
       await meal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
       await memoryEntry.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
-      await journal.meals.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
+      await activeJournal.meals.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
       await loadedMealMemory.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
-      await journal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
+      await activeJournal.$jazz.waitForSync({ timeout: syncSaveTimeoutMs });
 
       clearMealComposer();
       setReviewDraft(null);
@@ -1878,12 +2034,12 @@ export function NutritionDiary() {
   }
 
   function removeMeal(id: string) {
-    const index = journal.meals.findIndex((meal) => meal.$jazz.id === id);
+    const index = activeJournal.meals.findIndex((meal) => meal.$jazz.id === id);
     if (index === -1) {
       throw new Error(`Meal ${id} was not found in the Jazz journal.`);
     }
 
-    journal.meals.$jazz.splice(index, 1);
+    activeJournal.meals.$jazz.splice(index, 1);
     setExpandedMealId((current) => (current === id ? null : current));
     setStatus("Прием пищи удален из Jazz-дневника.");
   }
@@ -1901,7 +2057,7 @@ export function NutritionDiary() {
                 Prilozyxa Calories
               </p>
               <p className="text-sm text-[#617069]">
-                {formatJournalDate(journal.dateIso)} ·{" "}
+                {formatJournalDate(activeJournal.dateIso)} ·{" "}
                 {isSignedIn ? "серверный аккаунт" : "анонимный дневник"}
               </p>
             </div>
@@ -2902,7 +3058,7 @@ export function NutritionDiary() {
                 <div>
                   <h2 className="text-2xl font-semibold leading-8">Дневник</h2>
                   <p className="mt-1 text-sm text-[#617069]">
-                    {formatJournalDate(journal.dateIso)}
+                    {formatJournalDate(activeJournal.dateIso)}
                   </p>
                 </div>
                 <Badge className="h-7 rounded-lg bg-[#e9edf7] px-3 text-[#263f78] hover:bg-[#e9edf7]">

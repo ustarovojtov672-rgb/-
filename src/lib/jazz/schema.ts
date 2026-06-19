@@ -4,14 +4,41 @@ import {
   calculateNutritionTargets,
   defaultNutritionProfile,
   targetDiff,
+  type GoalId,
+  type NutritionProfileData,
 } from "@/lib/nutrition/targets";
 
 type MigratableRoot = {
   $isLoaded: boolean;
+  journals?: { $isLoaded: boolean; length: number };
   $jazz: {
     has: (key: string) => boolean;
     set: (key: string, value: unknown) => void;
+    refs: {
+      journal?: {
+        load: (options?: unknown) => Promise<unknown>;
+      };
+      journals?: {
+        load: (options?: unknown) => Promise<unknown>;
+      };
+    };
   };
+};
+
+type MigratableJournal = {
+  $isLoaded: boolean;
+  meals?: Array<{
+    title?: string;
+    confidencePercent?: number;
+    agentSummary?: string;
+    photo?: unknown;
+  }>;
+};
+
+type MigratableJournals = {
+  $isLoaded: boolean;
+  length: number;
+  [Symbol.iterator]: () => IterableIterator<MigratableJournal>;
 };
 
 export const NutritionUserProfile = co.map({
@@ -86,6 +113,8 @@ export const NutritionJournal = co.map({
   meals: MealEntries,
 });
 
+export const NutritionJournals = co.list(NutritionJournal);
+
 export const NutritionAccount = co
   .account({
     profile: co.profile({
@@ -93,7 +122,8 @@ export const NutritionAccount = co
     }),
     root: co.map({
       userProfile: NutritionUserProfile.optional(),
-      journal: NutritionJournal,
+      journal: NutritionJournal.optional(),
+      journals: NutritionJournals.optional(),
       mealMemory: MealMemoryEntries.optional(),
     }),
   })
@@ -107,7 +137,7 @@ export const NutritionAccount = co
     if (!account.$jazz.has("root")) {
       account.$jazz.set("root", {
         userProfile: createInitialUserProfile(),
-        journal: createInitialJournal(),
+        journals: createInitialJournals(),
         mealMemory: [],
       });
     }
@@ -120,6 +150,20 @@ export const NutritionAccount = co
       root.$jazz.set("userProfile", createInitialUserProfile());
     }
 
+    if (root?.$isLoaded && !root.$jazz.has("journals")) {
+      const legacyJournal = await loadLegacyJournal(root);
+
+      root.$jazz.set("journals", createMigratedJournals(legacyJournal));
+    }
+
+    if (root?.$isLoaded && root.$jazz.has("journals")) {
+      const journals = await loadMigratedJournals(root);
+
+      if (isStarterJournalList(journals)) {
+        root.$jazz.set("journals", createInitialJournals());
+      }
+    }
+
     if (root?.$isLoaded && !root.$jazz.has("mealMemory")) {
       root.$jazz.set("mealMemory", []);
     }
@@ -130,63 +174,119 @@ function createInitialUserProfile() {
 }
 
 function createInitialJournal() {
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const targets = calculateNutritionTargets(defaultNutritionProfile, "cut");
+  return createNutritionJournal({
+    dateIso: todayDateIso(),
+    profile: defaultNutritionProfile,
+    goalId: "cut",
+  });
+}
+
+export function createNutritionJournal({
+  dateIso,
+  profile,
+  goalId,
+}: {
+  dateIso: string;
+  profile: NutritionProfileData;
+  goalId: GoalId;
+}): Parameters<typeof NutritionJournal.create>[0] {
+  const targets = calculateNutritionTargets(profile, goalId);
 
   return {
-    dateIso: today,
+    dateIso,
     goal: {
-      mode: "cut" as const,
+      mode: goalId,
       ...targetDiff(targets),
     },
-    meals: [
-      {
-        source: "text" as const,
-        title: "Овсянка, банан, кофе с молоком",
-        detail: "Плотный завтрак, много углеводов и калия.",
-        eatenAtIso: atTime(today, 9, 20),
-        caloriesKcal: 510,
-        proteinGrams: 18,
-        fatGrams: 14,
-        carbsGrams: 82,
-        fiberGrams: 10,
-        ironMilligrams: 2.6,
-        potassiumMilligrams: 780,
-      },
-      {
-        source: "text-photo" as const,
-        title: "Курица, рис, салат",
-        detail: "Хороший белок, клетчатка пока ниже дневной цели.",
-        photoName: "lunch-plate.jpg",
-        eatenAtIso: atTime(today, 13, 45),
-        caloriesKcal: 690,
-        proteinGrams: 48,
-        fatGrams: 19,
-        carbsGrams: 78,
-        fiberGrams: 8,
-        ironMilligrams: 3.2,
-        potassiumMilligrams: 920,
-      },
-      {
-        source: "text" as const,
-        title: "Греческий йогурт и ягоды",
-        detail: "Легкий перекус с белком, мало железа.",
-        eatenAtIso: atTime(today, 17, 10),
-        caloriesKcal: 260,
-        proteinGrams: 22,
-        fatGrams: 6,
-        carbsGrams: 31,
-        fiberGrams: 4,
-        ironMilligrams: 0.9,
-        potassiumMilligrams: 390,
-      },
-    ],
+    meals: [],
   };
 }
 
-function atTime(dateIso: string, hours: number, minutes: number) {
-  const date = new Date(`${dateIso}T00:00:00`);
-  date.setHours(hours, minutes, 0, 0);
-  return date.toISOString();
+function createInitialJournalValue() {
+  return NutritionJournal.create(createInitialJournal());
+}
+
+function createInitialJournals() {
+  return NutritionJournals.create([createInitialJournalValue()]);
+}
+
+function createMigratedJournals(legacyJournal: MigratableJournal | undefined) {
+  const journals =
+    legacyJournal && !isStarterJournal(legacyJournal)
+      ? [legacyJournal]
+      : [createInitialJournalValue()];
+
+  return NutritionJournals.create(
+    journals as Parameters<typeof NutritionJournals.create>[0],
+  );
+}
+
+export function todayDateIso(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+async function loadLegacyJournal(root: MigratableRoot) {
+  if (!root.$jazz.has("journal")) {
+    return undefined;
+  }
+
+  return (await root.$jazz.refs.journal?.load({
+    resolve: {
+      goal: true,
+      meals: { $each: true },
+    },
+  })) as MigratableJournal | undefined;
+}
+
+async function loadMigratedJournals(root: MigratableRoot) {
+  if (!root.$jazz.has("journals")) {
+    return undefined;
+  }
+
+  return (await root.$jazz.refs.journals?.load({
+    resolve: {
+      $each: {
+        goal: true,
+        meals: { $each: true },
+      },
+    },
+  })) as MigratableJournals | undefined;
+}
+
+function isStarterJournalList(journals: MigratableJournals | undefined) {
+  if (!journals?.$isLoaded || journals.length !== 1) {
+    return false;
+  }
+
+  const [journal] = Array.from(journals);
+
+  return Boolean(journal && isStarterJournal(journal));
+}
+
+function isStarterJournal(journal: MigratableJournal) {
+  if (!journal.$isLoaded || !Array.isArray(journal.meals)) {
+    return false;
+  }
+
+  const starterTitles = new Set([
+    "Овсянка, банан, кофе с молоком",
+    "Курица, рис, салат",
+    "Греческий йогурт и ягоды",
+  ]);
+
+  return (
+    journal.meals.length === starterTitles.size &&
+    journal.meals.every(
+      (meal) =>
+        meal.title &&
+        starterTitles.has(meal.title) &&
+        meal.confidencePercent === undefined &&
+        meal.agentSummary === undefined &&
+        meal.photo === undefined,
+    )
+  );
 }
