@@ -32,6 +32,7 @@
 Аi агент питания/sessions/
 
 # debug
+.codex-logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

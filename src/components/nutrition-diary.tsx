@@ -7,6 +7,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type ComponentProps,
   type DragEvent,
   type FormEvent,
 } from "react";
@@ -14,10 +15,8 @@ import {
   Apple,
   ArrowRight,
   Beef,
-  Bot,
   Camera,
   CheckCircle2,
-  CircleAlert,
   Cloud,
   Flame,
   ImagePlus,
@@ -44,10 +43,13 @@ import {
   useSyncConnectionStatus,
 } from "jazz-tools/react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import {
   Tabs,
   TabsContent,
@@ -55,6 +57,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { authClient } from "@/lib/auth/client";
 import { MealEntry, MealMemoryEntry, NutritionAccount } from "@/lib/jazz/schema";
 import {
@@ -1056,111 +1059,15 @@ function SourceLinks({ value }: { value: string | undefined }) {
   );
 }
 
-function AgentStatusPanel({
-  status,
-  error,
-  isBusy,
-  onRefresh,
-}: {
-  status: MealAgentStatusResponse | null;
-  error: string;
-  isBusy: boolean;
-  onRefresh: () => void;
-}) {
-  const isReady = status?.ok ?? false;
-  const isChecking = !status && isBusy && !error;
-
+function Panel({ className, ...props }: ComponentProps<typeof Card>) {
   return (
-    <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Bot className="size-5 shrink-0 text-[#225b43]" aria-hidden="true" />
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold">AI-агент</h2>
-            <p className="mt-1 text-sm leading-5 text-[#617069]">
-              {status
-                ? `${status.runtime} · ${status.model ?? "модель не указана"}`
-                : "Проверяем конфигурацию."}
-            </p>
-          </div>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Проверить AI-агента"
-          disabled={isBusy}
-          onClick={onRefresh}
-          className="size-9 shrink-0"
-        >
-          <RefreshCw
-            className={cn("size-4", isBusy ? "animate-spin" : "")}
-            aria-hidden="true"
-          />
-        </Button>
-      </div>
-
-      <div
-        className={cn(
-          "mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
-          isReady
-            ? "bg-[#e7f1eb] text-[#225b43]"
-            : isChecking
-              ? "bg-[#eef2f8] text-[#263f78]"
-              : "bg-[#fff8f4] text-[#704037]",
-        )}
-      >
-        {isReady ? (
-          <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
-        ) : isChecking ? (
-          <RefreshCw className="size-4 shrink-0 animate-spin" aria-hidden="true" />
-        ) : (
-          <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-        )}
-        <span>
-          {isReady
-            ? "Готов к анализу еды."
-            : isChecking
-              ? "Проверяем AI-агента."
-              : error || "Нужна проверка настроек агента."}
-        </span>
-      </div>
-
-      {status ? (
-        <div className="mt-3 divide-y divide-[#dfe7e2]">
-          {status.checks.map((check) => (
-            <div key={check.id} className="py-2">
-              <div className="flex items-start gap-2">
-                {check.ok ? (
-                  <CheckCircle2
-                    className="mt-0.5 size-4 shrink-0 text-[#225b43]"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <CircleAlert
-                    className="mt-0.5 size-4 shrink-0 text-[#a6544b]"
-                    aria-hidden="true"
-                  />
-                )}
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[#26302c]">
-                    {check.label}
-                  </p>
-                  <p className="mt-1 text-sm leading-5 text-[#617069]">
-                    {check.detail}
-                  </p>
-                  {!check.ok && check.action ? (
-                    <p className="mt-1 text-sm leading-5 text-[#704037]">
-                      {check.action}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </section>
+    <Card
+      className={cn(
+        "rounded-lg border-[#d7dfd9] bg-white p-4 shadow-sm",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
@@ -1179,57 +1086,75 @@ function AnalysisStateBanner({
 
   if (phase === "checking") {
     return (
-      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
-        Проверяем AI-агента перед анализом.
-      </div>
+      <Alert className="border-[#d8dde8] bg-[#eef2f8] text-[#263f78]">
+        <AlertDescription>
+          Проверяем анализ еды перед запуском.
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (phase === "analyzing") {
     return (
-      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
-        Агент анализирует текст, фото, память, локальную базу и web search.
-      </div>
+      <Alert className="border-[#d8dde8] bg-[#eef2f8] text-[#263f78]">
+        <AlertDescription>
+          Анализируем текст, фото, память, локальную базу и web search.
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (phase === "refining") {
     return (
-      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
-        Агент пересчитывает черновик с учетом уточнения.
-      </div>
+      <Alert className="border-[#d8dde8] bg-[#eef2f8] text-[#263f78]">
+        <AlertDescription>
+          Пересчитываем черновик с учетом уточнения.
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (phase === "review") {
     return (
-      <div className="rounded-lg border border-[#c9ddcf] bg-[#edf3ef] p-3 text-sm leading-5 text-[#225b43]">
-        Расчет готов. Проверь порцию и нутриенты перед сохранением.
-      </div>
+      <Alert className="border-[#c9ddcf] bg-[#edf3ef] text-[#225b43]">
+        <AlertDescription>
+          Расчет готов. Проверь порцию и нутриенты перед сохранением.
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (phase === "saving") {
     return (
-      <div className="rounded-lg border border-[#d8dde8] bg-[#eef2f8] p-3 text-sm leading-5 text-[#263f78]">
-        Сохраняем запись, фото и память блюда в Jazz.
-      </div>
+      <Alert className="border-[#d8dde8] bg-[#eef2f8] text-[#263f78]">
+        <AlertDescription>
+          Сохраняем запись, фото и память блюда в Jazz.
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (status?.ok === false) {
     return (
-      <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
-        AI-агент не готов. Открой блок «AI-агент» и исправь красные пункты.
-      </div>
+      <Alert
+        variant="destructive"
+        className="border-[#d7b9aa] bg-[#fff8f4] text-[#704037]"
+      >
+        <AlertDescription>
+          AI-анализ пока не готов. Проверь настройки агента и попробуй снова.
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
-        {error}
-      </div>
+      <Alert
+        variant="destructive"
+        className="border-[#d7b9aa] bg-[#fff8f4] text-[#704037]"
+      >
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
     );
   }
 
@@ -1259,19 +1184,25 @@ function MacroBar({
           {formatNumber(value)} / {formatNumber(target)} {unit}
         </span>
       </div>
-      <div
-        className="h-2 rounded-lg bg-[#dfe7e2]"
-        role="progressbar"
+      <Progress
+        value={progress}
         aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={progress}
-      >
-        <div
-          className={cn("h-2 rounded-lg", tone)}
-          style={{ width: `${progress}%` }}
-        />
-      </div>
+        className={cn(
+          "gap-0 [&_[data-slot=progress-indicator]]:rounded-lg [&_[data-slot=progress-track]]:h-2 [&_[data-slot=progress-track]]:bg-[#dfe7e2]",
+          tone === "bg-[#2f7a55]" &&
+            "[&_[data-slot=progress-indicator]]:bg-[#2f7a55]",
+          tone === "bg-[#a6544b]" &&
+            "[&_[data-slot=progress-indicator]]:bg-[#a6544b]",
+          tone === "bg-[#2f6993]" &&
+            "[&_[data-slot=progress-indicator]]:bg-[#2f6993]",
+          tone === "bg-[#8c6d2f]" &&
+            "[&_[data-slot=progress-indicator]]:bg-[#8c6d2f]",
+          tone === "bg-[#7b4ea0]" &&
+            "[&_[data-slot=progress-indicator]]:bg-[#7b4ea0]",
+          tone === "bg-[#c18b2d]" &&
+            "[&_[data-slot=progress-indicator]]:bg-[#c18b2d]",
+        )}
+      />
     </div>
   );
 }
@@ -1305,7 +1236,7 @@ function MealPhoto({ imageId, title }: { imageId: string; title: string }) {
 function LoadingDiary() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f4f7f4] px-4 text-[#17211d]">
-      <div className="rounded-lg border border-[#d7dfd9] bg-white p-5 shadow-sm">
+      <Card className="rounded-lg border-[#d7dfd9] bg-white p-5 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-[#17352f] text-white">
             <Utensils className="size-5" aria-hidden="true" />
@@ -1317,7 +1248,7 @@ function LoadingDiary() {
             </p>
           </div>
         </div>
-      </div>
+      </Card>
     </main>
   );
 }
@@ -1362,16 +1293,11 @@ export function NutritionDiary() {
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>("checking");
   const [agentStatus, setAgentStatus] =
     useState<MealAgentStatusResponse | null>(null);
-  const [agentStatusError, setAgentStatusError] = useState("");
-  const [isAgentStatusBusy, setIsAgentStatusBusy] = useState(false);
   const [status, setStatus] = useState("Дневник синхронизируется через Jazz.");
   const [activeTab, setActiveTab] = useState<AppTab>("add");
   const [expandedMealId, setExpandedMealId] = useState<string | null>(null);
 
   const refreshAgentStatus = useCallback(async () => {
-    setIsAgentStatusBusy(true);
-    setAgentStatusError("");
-
     try {
       const response = await fetch(mealAgentStatusEndpoint, {
         method: "GET",
@@ -1380,20 +1306,12 @@ export function NutritionDiary() {
       const payload = (await response.json()) as MealAgentStatusResponse;
 
       if (!response.ok) {
-        throw new Error("Не удалось проверить AI-агента.");
+        throw new Error("Не удалось проверить анализ еды.");
       }
 
       setAgentStatus(payload);
-      setAgentStatusError("");
-    } catch (error) {
+    } catch {
       setAgentStatus(null);
-      setAgentStatusError(
-        error instanceof Error
-          ? error.message
-          : "Не удалось проверить AI-агента.",
-      );
-    } finally {
-      setIsAgentStatusBusy(false);
     }
   }, []);
 
@@ -1718,7 +1636,7 @@ export function NutritionDiary() {
     }
 
     if (agentStatus?.ok === false) {
-      setAnalysisError("AI-агент не готов. Исправь красные пункты в диагностике.");
+      setAnalysisError("AI-анализ пока не готов. Проверь настройки агента и попробуй снова.");
       setAnalysisPhase("failed");
       setStatus("AI-анализ не запущен: агент не готов.");
       return;
@@ -1777,7 +1695,7 @@ export function NutritionDiary() {
     }
 
     if (agentStatus?.ok === false) {
-      setAnalysisError("AI-агент не готов. Исправь красные пункты в диагностике.");
+      setAnalysisError("AI-анализ пока не готов. Проверь настройки агента и попробуй снова.");
       setAnalysisPhase("failed");
       setStatus("Уточнение не запущено: агент не готов.");
       return;
@@ -2032,30 +1950,33 @@ export function NutritionDiary() {
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-1.5">
+                <ToggleGroup
+                  value={[authMode]}
+                  onValueChange={(value) => {
+                    const nextAuthMode = value[0] as AuthMode | undefined;
+
+                    if (nextAuthMode) {
+                      setAuthMode(nextAuthMode);
+                      setAuthError("");
+                    }
+                  }}
+                  variant="outline"
+                  spacing={1.5}
+                  className="grid w-full grid-cols-2"
+                >
                   {[
                     { id: "sign-in" as const, label: "Вход" },
                     { id: "sign-up" as const, label: "Регистрация" },
                   ].map((item) => (
-                    <button
+                    <ToggleGroupItem
                       key={item.id}
-                      type="button"
-                      aria-pressed={authMode === item.id}
-                      onClick={() => {
-                        setAuthMode(item.id);
-                        setAuthError("");
-                      }}
-                      className={cn(
-                        "h-9 rounded-lg border text-sm font-medium transition-colors",
-                        authMode === item.id
-                          ? "border-[#225b43] bg-[#e7f1eb] text-[#225b43]"
-                          : "border-[#d7dfd9] bg-white hover:bg-[#f3f7f4]",
-                      )}
+                      value={item.id}
+                      className="h-9 w-full border-[#d7dfd9] bg-white data-[state=on]:border-[#225b43] data-[state=on]:bg-[#e7f1eb] data-[state=on]:text-[#225b43]"
                     >
                       {item.label}
-                    </button>
+                    </ToggleGroupItem>
                   ))}
-                </div>
+                </ToggleGroup>
 
                 <form onSubmit={handleAuthSubmit} className="grid gap-2">
                   {authMode === "sign-up" ? (
@@ -2174,7 +2095,7 @@ export function NutritionDiary() {
           <TabsContent value="add" className="mt-4">
             <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)_minmax(320px,0.8fr)]">
           <aside className="space-y-4">
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#e7f1eb] text-[#225b43]">
                   <Target className="size-5" aria-hidden="true" />
@@ -2189,19 +2110,24 @@ export function NutritionDiary() {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-2">
+              <ToggleGroup
+                value={[selectedGoal]}
+                onValueChange={(value) => {
+                  const nextGoal = value[0] as GoalId | undefined;
+
+                  if (nextGoal) {
+                    handleGoalChange(nextGoal);
+                  }
+                }}
+                orientation="vertical"
+                variant="outline"
+                className="mt-4 w-full items-stretch"
+              >
                 {goals.map((item) => (
-                  <button
+                  <ToggleGroupItem
                     key={item.id}
-                    type="button"
-                    aria-pressed={item.id === selectedGoal}
-                    onClick={() => handleGoalChange(item.id)}
-                    className={cn(
-                      "rounded-lg border p-3 text-left transition-colors",
-                      item.id === selectedGoal
-                        ? "border-[#225b43] bg-[#e7f1eb]"
-                        : "border-[#d7dfd9] bg-white hover:bg-[#f3f7f4]",
-                    )}
+                    value={item.id}
+                    className="h-auto justify-start whitespace-normal rounded-lg border-[#d7dfd9] bg-white p-3 text-left data-[state=on]:border-[#225b43] data-[state=on]:bg-[#e7f1eb]"
                   >
                     <span className="block text-sm font-semibold">
                       {item.label}
@@ -2209,12 +2135,12 @@ export function NutritionDiary() {
                     <span className="mt-1 block text-sm leading-5 text-[#617069]">
                       {item.description}
                     </span>
-                  </button>
+                  </ToggleGroupItem>
                 ))}
-              </div>
-            </section>
+              </ToggleGroup>
+            </Panel>
 
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#eef2f8] text-[#263f78]">
                   <UserRound className="size-5" aria-hidden="true" />
@@ -2281,51 +2207,61 @@ export function NutritionDiary() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Пол</Label>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <ToggleGroup
+                    value={[nutritionProfile.biologicalSex]}
+                    onValueChange={(value) => {
+                      const nextSex = value[0] as BiologicalSex | undefined;
+
+                      if (nextSex) {
+                        updateProfile({ biologicalSex: nextSex });
+                      }
+                    }}
+                    variant="outline"
+                    spacing={1.5}
+                    className="grid w-full grid-cols-2"
+                  >
                     {biologicalSexOptions.map((item) => (
-                      <button
+                      <ToggleGroupItem
                         key={item}
-                        type="button"
-                        aria-pressed={nutritionProfile.biologicalSex === item}
-                        onClick={() => updateProfile({ biologicalSex: item })}
-                        className={cn(
-                          "h-10 rounded-lg border text-sm font-medium transition-colors",
-                          nutritionProfile.biologicalSex === item
-                            ? "border-[#263f78] bg-[#eef2f8] text-[#263f78]"
-                            : "border-[#d7dfd9] bg-white hover:bg-[#f3f7f4]",
-                        )}
+                        value={item}
+                        className="h-10 w-full border-[#d7dfd9] bg-white data-[state=on]:border-[#263f78] data-[state=on]:bg-[#eef2f8] data-[state=on]:text-[#263f78]"
                       >
                         {biologicalSexLabels[item]}
-                      </button>
+                      </ToggleGroupItem>
                     ))}
-                  </div>
+                  </ToggleGroup>
                 </div>
               </div>
 
               <div className="mt-3 space-y-1.5">
                 <Label>Активность</Label>
-                <div className="grid gap-1.5 sm:grid-cols-3">
+                <ToggleGroup
+                  value={[nutritionProfile.activityLevel]}
+                  onValueChange={(value) => {
+                    const nextActivity = value[0] as ActivityLevel | undefined;
+
+                    if (nextActivity) {
+                      updateProfile({ activityLevel: nextActivity });
+                    }
+                  }}
+                  variant="outline"
+                  spacing={1.5}
+                  className="grid w-full gap-1.5 sm:grid-cols-3"
+                >
                   {activityOptions.map((item) => (
-                    <button
+                    <ToggleGroupItem
                       key={item}
-                      type="button"
-                      aria-pressed={nutritionProfile.activityLevel === item}
-                      onClick={() => updateProfile({ activityLevel: item })}
-                      className={cn(
-                        "h-10 rounded-lg border text-sm font-medium transition-colors",
-                        nutritionProfile.activityLevel === item
-                          ? "border-[#225b43] bg-[#e7f1eb] text-[#225b43]"
-                          : "border-[#d7dfd9] bg-white hover:bg-[#f3f7f4]",
-                      )}
+                      value={item}
+                      className="h-10 w-full border-[#d7dfd9] bg-white data-[state=on]:border-[#225b43] data-[state=on]:bg-[#e7f1eb] data-[state=on]:text-[#225b43]"
                     >
                       {activityLabels[item]}
-                    </button>
+                    </ToggleGroupItem>
                   ))}
-                </div>
+                </ToggleGroup>
               </div>
-            </section>
+            </Panel>
 
-            <section className="overflow-hidden rounded-lg border border-[#d7dfd9] bg-white shadow-sm">
+            <Panel className="overflow-hidden p-0">
               <div
                 className="h-48 bg-cover bg-center"
                 style={{
@@ -2342,10 +2278,10 @@ export function NutritionDiary() {
                   {photoName || "Можно добавить снимок тарелки перед отправкой."}
                 </p>
               </div>
-            </section>
+            </Panel>
           </aside>
 
-          <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+          <Panel>
             <div className="flex flex-col gap-3 border-b border-[#dfe7e2] pb-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-2xl font-semibold leading-8">
@@ -2543,9 +2479,14 @@ export function NutritionDiary() {
                     </div>
                   ) : null}
                   {reviewDraft.needsUserReview ? (
-                    <div className="rounded-lg border border-[#d7b9aa] bg-[#fff8f4] p-3 text-sm leading-5 text-[#704037]">
-                      Агент просит проверить порцию или состав перед сохранением.
-                    </div>
+                    <Alert
+                      variant="destructive"
+                      className="border-[#d7b9aa] bg-[#fff8f4] text-[#704037]"
+                    >
+                      <AlertDescription>
+                        Агент просит проверить порцию или состав перед сохранением.
+                      </AlertDescription>
+                    </Alert>
                   ) : null}
                   <ConfidenceSignals
                     value={reviewDraft.confidenceSignalsSummary}
@@ -2710,17 +2651,10 @@ export function NutritionDiary() {
               </div>
             ) : null}
 
-          </section>
+          </Panel>
 
           <aside className="space-y-4">
-            <AgentStatusPanel
-              status={agentStatus}
-              error={agentStatusError}
-              isBusy={isAgentStatusBusy}
-              onRefresh={refreshAgentStatus}
-            />
-
-            <section className="rounded-lg border border-[#17352f] bg-[#17352f] p-4 text-white shadow-sm">
+            <Card className="rounded-lg border-[#17352f] bg-[#17352f] p-4 text-white shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm text-[#bdd3ca]">Сегодня</p>
@@ -2738,18 +2672,15 @@ export function NutritionDiary() {
                     ? `Осталось ${formatNumber(caloriesLeft)} ккал`
                     : `Перебор ${formatNumber(Math.abs(caloriesLeft))} ккал`}
                 </p>
-                <div className="mt-3 h-2 rounded-lg bg-white/15">
-                  <div
-                    className="h-2 rounded-lg bg-[#77c09a]"
-                    style={{
-                      width: `${progressValue(totals.calories, goal.targets.calories)}%`,
-                    }}
-                  />
-                </div>
+                <Progress
+                  value={progressValue(totals.calories, goal.targets.calories)}
+                  aria-label="Калории"
+                  className="mt-3 gap-0 [&_[data-slot=progress-indicator]]:rounded-lg [&_[data-slot=progress-indicator]]:bg-[#77c09a] [&_[data-slot=progress-track]]:h-2 [&_[data-slot=progress-track]]:bg-white/15"
+                />
               </div>
-            </section>
+            </Card>
 
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold">Обзор дня</h2>
@@ -2827,9 +2758,9 @@ export function NutritionDiary() {
                   <span>углеводы</span>
                 </div>
               </div>
-            </section>
+            </Panel>
 
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-center gap-2">
                 <Sparkles className="size-5 text-[#a6544b]" aria-hidden="true" />
                 <h2 className="text-lg font-semibold">Что съесть дальше</h2>
@@ -2837,18 +2768,18 @@ export function NutritionDiary() {
               <p className="mt-3 text-base leading-7 text-[#2b3732]">
                 {recommendation}
               </p>
-              <div className="mt-4 flex gap-2 rounded-lg bg-[#f7eee9] p-3 text-sm leading-5 text-[#704037]">
+              <Alert className="mt-4 border-[#f1ded5] bg-[#f7eee9] text-[#704037]">
                 <CheckCircle2
-                  className="mt-0.5 size-4 shrink-0"
+                  className="size-4"
                   aria-hidden="true"
                 />
-                <span>
+                <AlertDescription>
                   Рекомендация пересчитывается после каждой новой записи.
-                </span>
-              </div>
-            </section>
+                </AlertDescription>
+              </Alert>
+            </Panel>
 
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-center gap-2">
                 <MessageSquareText
                   className="size-5 text-[#2f6993]"
@@ -2900,32 +2831,33 @@ export function NutritionDiary() {
                   tone="bg-[#c18b2d]"
                 />
               </div>
-            </section>
+            </Panel>
 
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-center gap-2">
                 <Plus className="size-5 text-[#225b43]" aria-hidden="true" />
                 <h2 className="text-lg font-semibold">Следующие продукты</h2>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {suggestedProducts.map((item) => (
-                  <button
+                  <Button
                     key={item}
                     type="button"
+                    variant="outline"
                     onClick={() =>
                       setMealText((current) =>
                         current ? `${current}, ${item}` : item,
                       )
                     }
-                    className="rounded-lg border border-[#d7dfd9] bg-[#fbfcfb] px-3 py-2 text-sm font-medium transition-colors hover:bg-[#edf3ef]"
+                    className="h-9 border-[#d7dfd9] bg-[#fbfcfb] px-3 hover:bg-[#edf3ef]"
                   >
                     {item}
-                  </button>
+                  </Button>
                 ))}
               </div>
-            </section>
+            </Panel>
 
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex items-center gap-2">
                 <Database className="size-5 text-[#225b43]" aria-hidden="true" />
                 <h2 className="text-lg font-semibold">Знакомые блюда</h2>
@@ -2959,13 +2891,13 @@ export function NutritionDiary() {
                   </p>
                 )}
               </div>
-            </section>
+            </Panel>
           </aside>
         </div>
           </TabsContent>
 
           <TabsContent value="diary" className="mt-4">
-            <section className="rounded-lg border border-[#d7dfd9] bg-white p-4 shadow-sm">
+            <Panel>
               <div className="flex flex-col gap-3 border-b border-[#dfe7e2] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-2xl font-semibold leading-8">Дневник</h2>
@@ -3010,10 +2942,10 @@ export function NutritionDiary() {
                     const isExpanded = expandedMealId === meal.$jazz.id;
 
                     return (
-                      <article
+                      <Card
                         key={meal.$jazz.id}
                         className={cn(
-                          "rounded-lg border bg-[#fbfcfb] transition-colors",
+                          "rounded-lg border bg-[#fbfcfb] p-0 py-0 transition-colors",
                           isExpanded
                             ? "border-[#225b43]"
                             : "border-[#dfe7e2]",
@@ -3151,7 +3083,7 @@ export function NutritionDiary() {
                             </div>
                           </div>
                         ) : null}
-                      </article>
+                      </Card>
                     );
                   })}
                 </div>
@@ -3160,7 +3092,7 @@ export function NutritionDiary() {
                   Записей за день пока нет.
                 </div>
               )}
-            </section>
+            </Panel>
           </TabsContent>
         </Tabs>
       </div>
